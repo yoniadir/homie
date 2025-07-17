@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Homie Scraper API Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 { color: #333; }
+        h2 { color: #666; }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        .result {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .error { border-color: #dc3545; background-color: #f8d7da; }
+        .success { border-color: #28a745; background-color: #d4edda; }
+        .loading { border-color: #ffc107; background-color: #fff3cd; }
+        input, select {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .job-card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 5px 0;
+            background-color: #f9f9f9;
+        }
+        .status-pending { border-left: 4px solid #ffc107; }
+        .status-running { border-left: 4px solid #17a2b8; }
+        .status-completed { border-left: 4px solid #28a745; }
+        .status-failed { border-left: 4px solid #dc3545; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏠 Homie Scraper API Client</h1>
+        <p>Control panel for the Homie Real Estate Scraper API</p>
+    </div>
+
+    <div class="container">
+        <h2>🚀 Start Scraping</h2>
+        <div>
+            <label>URL (optional):</label><br>
+            <input type="text" id="scrapeUrl" placeholder="Leave empty for default URL" style="width: 60%;">
+        </div>
+        <div>
+            <label><input type="checkbox" id="exportCsv" checked> Export to CSV</label>
+            <label><input type="checkbox" id="cleanOldData" checked> Clean old data</label>
+            <label>Keep data for: <input type="number" id="cleanOldDays" value="30" min="1"> days</label>
+        </div>
+        <button onclick="startScraping()">Start Scraping</button>
+        <div id="scrapeResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="container">
+        <h2>📊 Current Jobs</h2>
+        <button onclick="refreshJobs()">Refresh Jobs</button>
+        <button onclick="clearCompletedJobs()">Clear Completed</button>
+        <div id="jobsList"></div>
+    </div>
+
+    <div class="container">
+        <h2>📈 Database Statistics</h2>
+        <button onclick="getStats()">Get Statistics</button>
+        <div id="statsResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="container">
+        <h2>🏘️ Properties</h2>
+        <button onclick="getProperties()">Get All Properties</button>
+        <button onclick="exportToCSV()">Export to CSV</button>
+        <div id="propertiesResult" class="result" style="display: none;"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:3001';
+
+        async function startScraping() {
+            const url = document.getElementById('scrapeUrl').value;
+            const exportCsv = document.getElementById('exportCsv').checked;
+            const cleanOldData = document.getElementById('cleanOldData').checked;
+            const cleanOldDays = parseInt(document.getElementById('cleanOldDays').value);
+
+            const resultDiv = document.getElementById('scrapeResult');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result loading';
+            resultDiv.textContent = 'Starting scraping job...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/scrape`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: url || undefined,
+                        options: { exportCsv, cleanOldData, cleanOldDays }
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `Scraping job started successfully!\nJob ID: ${data.jobId}\nStatus: ${data.status}`;
+                    
+                    // Start monitoring the job
+                    monitorJob(data.jobId);
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `Error: ${data.error}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Network error: ${error.message}`;
+            }
+        }
+
+        async function monitorJob(jobId) {
+            const resultDiv = document.getElementById('scrapeResult');
+            
+            const checkStatus = async () => {
+                try {
+                    const response = await fetch(`${API_BASE_URL}/scrape/${jobId}`);
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        const job = data.job;
+                        const duration = Math.round(job.duration / 1000);
+                        
+                        resultDiv.textContent = `Job ID: ${jobId}\nStatus: ${job.status}\nProgress: ${job.progress || 'N/A'}\nDuration: ${duration}s`;
+                        
+                        if (job.status === 'completed') {
+                            resultDiv.className = 'result success';
+                            resultDiv.textContent += `\n\nResults:\n- Total properties: ${job.result?.totalItems || 0}\n- Database: ${job.result?.dbStats?.inserted || 0} new, ${job.result?.dbStats?.updated || 0} updated`;
+                            refreshJobs();
+                        } else if (job.status === 'failed') {
+                            resultDiv.className = 'result error';
+                            resultDiv.textContent += `\n\nError: ${job.error}`;
+                        } else {
+                            // Continue monitoring
+                            setTimeout(checkStatus, 5000);
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error monitoring job:', error);
+                }
+            };
+            
+            checkStatus();
+        }
+
+        async function refreshJobs() {
+            const jobsList = document.getElementById('jobsList');
+            jobsList.innerHTML = 'Loading jobs...';
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/scrape`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    if (data.jobs.length === 0) {
+                        jobsList.innerHTML = '<p>No jobs found.</p>';
+                    } else {
+                        jobsList.innerHTML = data.jobs.map(job => `
+                            <div class="job-card status-${job.status}">
+                                <strong>Job ID:</strong> ${job.id}<br>
+                                <strong>Status:</strong> ${job.status}<br>
+                                <strong>Started:</strong> ${new Date(job.startTime).toLocaleString()}<br>
+                                <strong>Duration:</strong> ${Math.round(job.duration / 1000)}s<br>
+                                <strong>URL:</strong> ${job.url || 'Default'}<br>
+                                ${job.status !== 'running' ? `<button onclick="deleteJob('${job.id}')">Delete</button>` : ''}
+                            </div>
+                        `).join('');
+                    }
+                } else {
+                    jobsList.innerHTML = `<p class="error">Error: ${data.error}</p>`;
+                }
+            } catch (error) {
+                jobsList.innerHTML = `<p class="error">Network error: ${error.message}</p>`;
+            }
+        }
+
+        async function deleteJob(jobId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    refreshJobs();
+                } else {
+                    alert('Failed to delete job');
+                }
+            } catch (error) {
+                alert('Error deleting job: ' + error.message);
+            }
+        }
+
+        async function clearCompletedJobs() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/jobs`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    refreshJobs();
+                } else {
+                    alert('Failed to clear jobs');
+                }
+            } catch (error) {
+                alert('Error clearing jobs: ' + error.message);
+            }
+        }
+
+        async function getStats() {
+            const resultDiv = document.getElementById('statsResult');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result loading';
+            resultDiv.textContent = 'Loading statistics...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/stats`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    const stats = data.statistics;
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `Database Statistics:
+Total Properties: ${stats.totalProperties}
+Today's Properties: ${stats.todayProperties}
+Average Price: ₪${stats.avgPrice}
+
+Top Locations:
+${stats.locationCounts.map((loc, i) => `${i + 1}. ${loc.location}: ${loc.count} properties`).join('\n')}
+
+Updated: ${new Date(data.timestamp).toLocaleString()}`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `Error: ${data.error}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Network error: ${error.message}`;
+            }
+        }
+
+        async function getProperties() {
+            const resultDiv = document.getElementById('propertiesResult');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result loading';
+            resultDiv.textContent = 'Loading properties...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/properties`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `Found ${data.count} properties in database.\n\nFirst 5 properties:\n${data.properties.slice(0, 5).map(p => `- ${p.title} (${p.price}) - ${p.location}`).join('\n')}`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `Error: ${data.error}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Network error: ${error.message}`;
+            }
+        }
+
+        async function exportToCSV() {
+            const resultDiv = document.getElementById('propertiesResult');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result loading';
+            resultDiv.textContent = 'Exporting to CSV...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/export`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = `Export successful!\nCSV file: ${data.csvPath}\nExported at: ${new Date(data.timestamp).toLocaleString()}`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = `Error: ${data.error}`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `Network error: ${error.message}`;
+            }
+        }
+
+        // Auto-refresh jobs every 30 seconds
+        setInterval(refreshJobs, 30000);
+        
+        // Load jobs on page load
+        refreshJobs();
+    </script>
+</body>
+</html>
