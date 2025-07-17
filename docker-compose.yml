@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: homie_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: homie_db
+      MYSQL_USER: homie_user
+      MYSQL_PASSWORD: homie_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - homie_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  api:
+    build: .
+    container_name: homie_api
+    environment:
+      - NODE_ENV=production
+      - DOCKER_ENV=true
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=homie_user
+      - DB_PASSWORD=homie_pass
+      - DB_NAME=homie_db
+    ports:
+      - "3001:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - homie_network
+    volumes:
+      - ./exports:/app/exports
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: homie_phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: root
+      PMA_PASSWORD: root123
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
+    networks:
+      - homie_network
+
+volumes:
+  mysql_data:
+
+networks:
+  homie_network:
+    driver: bridge 

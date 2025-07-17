@@ -1,0 +1,53 @@
+{
+  "name": "homie",
+  "version": "1.0.0",
+  "description": "A TypeScript project",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "dev:enhanced": "ts-node src/index.ts --enhanced",
+    "dev:db": "ts-node src/index.ts --enhanced --db",
+    "dev:integrated": "ts-node src/index.ts --integrated",
+    "api:dev": "ts-node src/api-server.ts",
+    "api:start": "node dist/api-server.js",
+    "api:test": "ts-node src/test-api.ts",
+    "client:dev": "ts-node src/static-server.ts",
+    "scrape:csv": "ts-node src/index.ts --enhanced",
+    "scrape:db": "ts-node src/index.ts --enhanced --db",
+    "scrape:all": "ts-node src/index.ts --integrated",
+    "test:csv": "ts-node src/test-csv.ts",
+    "test:database": "ts-node src/test-database.ts",
+    "quick:test": "ts-node src/quick-test.ts",
+    "test:enhanced": "ts-node src/test-enhanced.ts",
+    "debug": "ts-node src/debug.ts",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:up:build": "docker-compose up -d --build",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:logs:api": "docker-compose logs -f api",
+    "docker:logs:mysql": "docker-compose logs -f mysql"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "puppeteer": "^24.11.2",
+    "mysql2": "^3.6.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}
