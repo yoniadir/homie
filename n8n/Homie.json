@@ -1,0 +1,498 @@
+{
+  "name": "Homie",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3001/scrape",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "id": "d8277f5d-948d-4732-92dd-ae10661b3b8a",
+      "name": "Start Homie Scraping"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:3001/scrape/{{ $('Start Homie Scraping').item.json.jobId }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        840,
+        0
+      ],
+      "id": "95bc0d20-336a-45c4-95ec-eaf40eefeedd",
+      "name": "Check for Homie scraping job status"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "26ee4177-dbd8-4cea-af06-5c166ee280ea",
+              "leftValue": "={{ $json.job.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1020,
+        0
+      ],
+      "id": "16428573-f0b5-4d46-8410-c35464699ef6",
+      "name": "If Job status is completed"
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        640,
+        0
+      ],
+      "id": "54ee6350-483c-428a-aed4-d81c2a1f8dec",
+      "name": "Wait",
+      "webhookId": "cefc41dc-6d29-4474-a8ad-a4e8c0d39903"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "properties",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        -100
+      ],
+      "id": "13275c79-0326-4df0-aff3-adafd6c203d3",
+      "name": "Split Out"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:3001/scrape/{{ $json.job.id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1720,
+        200
+      ],
+      "id": "300924c1-bf32-4dc4-83d8-68d19c614a94",
+      "name": "Check for Homie scraping job status1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "26ee4177-dbd8-4cea-af06-5c166ee280ea",
+              "leftValue": "={{ $json.job.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1980,
+        200
+      ],
+      "id": "d5729738-e959-494c-932e-32fea9624cd0",
+      "name": "If Job status is completed1"
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2220,
+        220
+      ],
+      "id": "ff2dfd26-7ed9-4fb0-81f9-40d1a03d4a5f",
+      "name": "Wait1",
+      "webhookId": "cefc41dc-6d29-4474-a8ad-a4e8c0d39903"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:3001/scrape/{{ $('Start Homie Scraping').item.json.jobId }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2440,
+        220
+      ],
+      "id": "fcb53948-6206-401c-a844-538ed2d01c25",
+      "name": "Check for Homie scraping job status2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "26ee4177-dbd8-4cea-af06-5c166ee280ea",
+              "leftValue": "={{ $json.job.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2660,
+        220
+      ],
+      "id": "574da946-b3ca-4174-ba56-2b617c801933",
+      "name": "If Job status is completed2"
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        200
+      ],
+      "id": "22f275ec-0074-405b-969b-107c109acf6a",
+      "name": "Wait2",
+      "webhookId": "cefc41dc-6d29-4474-a8ad-a4e8c0d39903"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "e4088ff6-e05d-4177-9344-33675e154710",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/api/sendText",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chatId",
+              "value": "1234567890@c.us"
+            },
+            {
+              "name": "text",
+              "value": "={{ $json.location }}\n{{ $json.price }}\n{{ $json.rooms }}\n{{ $json.floor }}\n{{ $json.link }}"
+            },
+            {
+              "name": "session",
+              "value": "default"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -100
+      ],
+      "id": "31637e01-fcb8-448e-bc2f-e4f2af6bc737",
+      "name": "Send message to Whatsapp"
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:3001/whatsapp/unsent",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -100
+      ],
+      "id": "db7b60e3-fe7c-40af-b543-e0c29ff05491",
+      "name": "Get new properties"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:3001/whatsapp/mark-sent",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2000,
+        -100
+      ],
+      "id": "7ab13b33-59a5-4f9d-8d5c-7039097c4d00",
+      "name": "Mark properties as read"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start Homie Scraping": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Homie scraping job status": {
+      "main": [
+        [
+          {
+            "node": "If Job status is completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Job status is completed": {
+      "main": [
+        [
+          {
+            "node": "Get new properties",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Check for Homie scraping job status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out": {
+      "main": [
+        [
+          {
+            "node": "Send message to Whatsapp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Homie scraping job status1": {
+      "main": [
+        [
+          {
+            "node": "If Job status is completed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Job status is completed1": {
+      "main": [
+        [
+          {
+            "node": "Get new properties",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Check for Homie scraping job status2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for Homie scraping job status2": {
+      "main": [
+        [
+          {
+            "node": "If Job status is completed2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Job status is completed2": {
+      "main": [
+        [
+          {
+            "node": "Get new properties",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "Check for Homie scraping job status1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Start Homie Scraping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send message to Whatsapp": {
+      "main": [
+        [
+          {
+            "node": "Mark properties as read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get new properties": {
+      "main": [
+        [
+          {
+            "node": "Split Out",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "39972af6-cbd7-445e-9c88-1de5789c269f",
+  "meta": {
+    "instanceId": "c57aca62ac929c1d841492e410bc084c9349de82310cc1037dfbb901d729a441"
+  },
+  "id": "MFzlV4UonHiCUtXI",
+  "tags": []
+}
