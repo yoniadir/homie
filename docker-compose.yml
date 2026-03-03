@@ -1,14 +1,12 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
     container_name: homie_mysql
     environment:
-      MYSQL_ROOT_PASSWORD: root123
-      MYSQL_DATABASE: homie_db
-      MYSQL_USER: homie_user
-      MYSQL_PASSWORD: homie_pass
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root123}
+      MYSQL_DATABASE: ${DB_NAME:-homie_db}
+      MYSQL_USER: ${DB_USER:-homie_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-homie_pass}
     ports:
       - "3306:3306"
     volumes:
@@ -24,14 +22,17 @@ services:
   api:
     build: .
     container_name: homie_api
+    env_file: .env
     environment:
       - NODE_ENV=production
       - DOCKER_ENV=true
       - DB_HOST=mysql
       - DB_PORT=3306
-      - DB_USER=homie_user
-      - DB_PASSWORD=homie_pass
-      - DB_NAME=homie_db
+      - DB_USER=${DB_USER:-homie_user}
+      - DB_PASSWORD=${DB_PASSWORD:-homie_pass}
+      - DB_NAME=${DB_NAME:-homie_db}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
     ports:
       - "3001:8080"
     depends_on:
@@ -42,15 +43,41 @@ services:
     volumes:
       - ./exports:/app/exports
 
+  scheduler:
+    build: .
+    container_name: homie_scheduler
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - DOCKER_ENV=true
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-homie_user}
+      - DB_PASSWORD=${DB_PASSWORD:-homie_pass}
+      - DB_NAME=${DB_NAME:-homie_db}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - SCRAPE_CRON=${SCRAPE_CRON:-0,30 8-23 * * *}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - homie_network
+    volumes:
+      - ./exports:/app/exports
+    command: npm run scheduler:start
+    profiles:
+      - scheduler
+
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
     container_name: homie_phpmyadmin
     environment:
       PMA_HOST: mysql
       PMA_USER: root
-      PMA_PASSWORD: root123
+      PMA_PASSWORD: ${DB_ROOT_PASSWORD:-root123}
     ports:
-      - "8080:80"
+      - "8081:80"
     depends_on:
       - mysql
     networks:
