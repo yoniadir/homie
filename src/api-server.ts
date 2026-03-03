@@ -1,7 +1,9 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { ScraperDatabaseService } from './services/scraper-db.service';
 import { DatabaseService } from './services/database.service';
+import { TelegramService } from './services/telegram.service';
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -30,7 +32,7 @@ const generateJobId = (): string => {
 };
 
 // Default target URL
-const DEFAULT_URL = 'https://www.yad2.co.il/realestate/rent?maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520';
+const DEFAULT_URL = 'https://www.yad2.co.il/realestate/rent?maxPrice=12000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520';
 
 /**
  * Health check endpoint
@@ -58,12 +60,10 @@ app.get('/', (req, res) => {
       'GET /scrape': 'List all jobs',
       'GET /stats': 'Get database statistics',
       'GET /properties': 'Get all properties from database',
-      'GET /whatsapp/unsent': 'Get properties that haven\'t been sent via WhatsApp',
-      'POST /whatsapp/mark-sent': 'Mark all properties as WhatsApp message sent',
+      'GET /notifications/unsent': 'Get properties that have not been notified yet',
+      'POST /notifications/mark-sent': 'Mark properties as notified',
+      'POST /notifications/send': 'Send Telegram notifications for unnotified properties',
       'POST /export': 'Export database to CSV',
-      'POST /whatsapp/export-new': 'Export new properties via WhatsApp',
-      'POST /whatsapp/export-today': 'Export today\'s properties via WhatsApp',
-      'POST /whatsapp/export-stats': 'Export database statistics via WhatsApp',
       'DELETE /jobs/:jobId': 'Delete a completed job',
       'DELETE /jobs': 'Clear all completed jobs'
     },
@@ -297,17 +297,17 @@ app.delete('/jobs', (req, res) => {
 });
 
 /**
- * Get all properties that haven't been sent via WhatsApp
+ * Get all properties that have not been notified yet
  */
-app.get('/whatsapp/unsent', async (req, res) => {
+app.get('/notifications/unsent', async (req, res) => {
   try {
     const dbService = new DatabaseService();
     await dbService.connect();
-    
-    const unsentProperties = await dbService.getPropertiesWithoutWhatsAppMessage();
-    
+
+    const unsentProperties = await dbService.getUnnotifiedProperties();
+
     await dbService.disconnect();
-    
+
     res.json({
       success: true,
       properties: unsentProperties,
@@ -315,38 +315,89 @@ app.get('/whatsapp/unsent', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Error getting unsent properties:', error);
+    console.error('Error getting unnotified properties:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to get unsent properties',
+      error: 'Failed to get unnotified properties',
       details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 });
 
 /**
- * Mark all properties as WhatsApp message sent
+ * Mark all unnotified properties as notified
  */
-app.post('/whatsapp/mark-sent', async (req, res) => {
+app.post('/notifications/mark-sent', async (req, res) => {
   try {
     const dbService = new DatabaseService();
     await dbService.connect();
-    
-    const updatedCount = await dbService.markAllPropertiesAsWhatsAppSent();
-    
+
+    const unnotified = await dbService.getUnnotifiedProperties();
+    const ids = unnotified.map((p) => p.id);
+    const updatedCount = ids.length > 0 ? await dbService.markAsNotified(ids) : 0;
+
     await dbService.disconnect();
-    
+
     res.json({
       success: true,
-      message: `Successfully marked ${updatedCount} properties as WhatsApp message sent`,
+      message: `Successfully marked ${updatedCount} properties as notified`,
       updatedCount,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Error marking properties as sent:', error);
+    console.error('Error marking properties as notified:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to mark properties as sent',
+      error: 'Failed to mark properties as notified',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * Send Telegram notifications for all unnotified properties
+ */
+app.post('/notifications/send', async (req, res) => {
+  try {
+    const dbService = new DatabaseService();
+    const telegramService = new TelegramService();
+
+    if (!telegramService.isConfigured()) {
+      return res.status(503).json({
+        success: false,
+        error: 'Telegram is not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required)',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    await dbService.connect();
+    const unnotified = await dbService.getUnnotifiedProperties();
+
+    if (unnotified.length === 0) {
+      await dbService.disconnect();
+      return res.json({
+        success: true,
+        message: 'No unnotified properties to send',
+        sentCount: 0,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    await telegramService.sendBatch(unnotified);
+    await dbService.markAsNotified(unnotified.map((p) => p.id));
+    await dbService.disconnect();
+
+    return res.json({
+      success: true,
+      message: `Sent Telegram notifications for ${unnotified.length} properties`,
+      sentCount: unnotified.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error sending notifications:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to send notifications',
       details: error instanceof Error ? error.message : 'Unknown error'
     });
   }

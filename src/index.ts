@@ -13,60 +13,84 @@ const enhancedScraperService = new EnhancedPuppeteerScraperService();
 const csvExportService = new CsvExportService();
 const scraperDatabaseService = new ScraperDatabaseService();
 
-// The target URL for scraping Yad2
-const targetUrl = 'https://www.yad2.co.il/realestate/rent?maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520';
+// The target URLs for scraping Yad2
+const targetUrls = [
+  'https://www.yad2.co.il/realestate/rent?minPrice=8000&maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520',
+  'https://www.yad2.co.il/realestate/rent?minPrice=8000&maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1521',
+  'https://www.yad2.co.il/realestate/rent?minPrice=8000&maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=495'
+];
 
 /**
- * Main function to scrape properties with fallback strategy
+ * Main function to scrape properties with fallback strategy from multiple URLs
  */
 async function scrapeProperties(): Promise<void> {
+  let allProperties: PropertyItem[] = [];
+  let totalSuccessful = 0;
+  let totalFailed = 0;
+
   try {
     console.log('🔍 Starting property scraping...');
-    console.log(`📍 Target URL: ${targetUrl}`);
+    console.log(`📍 Target URLs: ${targetUrls.length} locations`);
+    targetUrls.forEach((url, index) => {
+      console.log(`   ${index + 1}. ${url}`);
+    });
     console.log('⏳ This may take a moment...\n');
 
-    // Try basic scraper first
-    console.log('🔧 Attempting basic HTTP scraping...');
-    let result = await basicScraperService.scrapeProperties(targetUrl);
-
-    // If basic scraper fails due to bot protection, use enhanced Puppeteer
-    if (!result.success && result.error?.includes('Bot protection')) {
-      console.log('🚀 Bot protection detected, switching to Enhanced Puppeteer...');
-      console.log('⚠️  This will open a browser window - please don\'t close it during scraping\n');
+    for (let i = 0; i < targetUrls.length; i++) {
+      const targetUrl = targetUrls[i];
+      console.log(`🔧 [${i + 1}/${targetUrls.length}] Scraping: ${targetUrl!.split('neighborhood=')[1] ? 'neighborhood ' + targetUrl!.split('neighborhood=')[1] : 'location ' + (i + 1)}...`);
       
       try {
-        result = await enhancedScraperService.scrapeProperties(targetUrl);
-      } finally {
-        // Always close the browser
-        await enhancedScraperService.closeBrowser();
+        // Try basic scraper first
+        let result = await basicScraperService.scrapeProperties(targetUrl!);
+
+        // If basic scraper fails due to bot protection, use enhanced Puppeteer
+        if (!result.success && result.error?.includes('Bot protection')) {
+          console.log('🚀 Bot protection detected, switching to Enhanced Puppeteer...');
+          console.log('⚠️  This will open a browser window - please don\'t close it during scraping\n');
+          
+          try {
+            result = await enhancedScraperService.scrapeProperties(targetUrl!);
+          } finally {
+            // Always close the browser
+            await enhancedScraperService.closeBrowser();
+          }
+        }
+
+        if (result.success) {
+          console.log(`✅ [${i + 1}/${targetUrls.length}] Success: ${result.totalItems} properties found`);
+          allProperties.push(...result.data);
+          totalSuccessful++;
+        } else {
+          console.error(`❌ [${i + 1}/${targetUrls.length}] Failed: ${result.error}`);
+          totalFailed++;
+        }
+      } catch (error) {
+        console.error(`💥 [${i + 1}/${targetUrls.length}] Unexpected error:`, error);
+        totalFailed++;
       }
     }
 
-    if (result.success) {
-      console.log('✅ Scraping completed successfully!');
-      console.log(`📊 Total properties found: ${result.totalItems}`);
-      console.log(`🕐 Scraped at: ${result.timestamp.toLocaleString()}\n`);
+    console.log('\n📊 Scraping Summary:');
+    console.log(`✅ Successful: ${totalSuccessful}/${targetUrls.length} URLs`);
+    console.log(`❌ Failed: ${totalFailed}/${targetUrls.length} URLs`);
+    console.log(`📊 Total properties found: ${allProperties.length}`);
 
-      if (result.data.length > 0) {
-        console.log('🏘️  Property Listings Length: ', result.data.length, '\n');
-      } else {
-        console.log('⚠️  No properties found. This could mean:');
-        console.log('   - The website structure has changed');
-        console.log('   - No properties match the search criteria');
-        console.log('   - The scraping was blocked');
-        
-        // Still try to export empty results for debugging
-        try {
-          const csvPath = await csvExportService.exportToCSVEnhanced([], 'empty_results.csv');
-          console.log(`📄 Empty results file created: ${csvPath}`);
-        } catch (error) {
-          console.warn('⚠️ Could not create empty results file:', error);
-        }
-      }
+    if (allProperties.length > 0) {
+      console.log('\n🏘️  Combined Property Listings Length: ', allProperties.length, '\n');
     } else {
-      console.error('❌ Scraping failed:');
-      console.error(`Error: ${result.error}`);
-      console.error(`Timestamp: ${result.timestamp.toLocaleString()}`);
+      console.log('⚠️  No properties found from any URL. This could mean:');
+      console.log('   - The website structure has changed');
+      console.log('   - No properties match the search criteria');
+      console.log('   - The scraping was blocked');
+      
+      // Still try to export empty results for debugging
+      try {
+        const csvPath = await csvExportService.exportToCSVEnhanced([], 'empty_results.csv');
+        console.log(`📄 Empty results file created: ${csvPath}`);
+      } catch (error) {
+        console.warn('⚠️ Could not create empty results file:', error);
+      }
     }
   } catch (error) {
     console.error('💥 Unexpected error occurred:');
@@ -75,89 +99,120 @@ async function scrapeProperties(): Promise<void> {
 }
 
 /**
- * Function to use only the enhanced Puppeteer scraper with CSV and Database saving
+ * Function to use only the enhanced Puppeteer scraper with CSV and Database saving for multiple URLs
  */
 async function scrapeWithEnhancedPuppeteer(): Promise<void> {
+  let allProperties: PropertyItem[] = [];
+  let totalSuccessful = 0;
+  let totalFailed = 0;
+
   try {
     console.log('🚀 Starting Enhanced Puppeteer scraping...');
+    console.log(`📍 Target URLs: ${targetUrls.length} locations`);
     console.log('⚠️  This will open a browser window - please don\'t close it during scraping\n');
     
-    const result = await enhancedScraperService.scrapeProperties(targetUrl);
-    
-    if (result.success) {
-      console.log('✅ Enhanced Puppeteer scraping completed successfully!');
-      console.log(`📊 Total properties found: ${result.totalItems}`);
-      console.log(`🕐 Scraped at: ${result.timestamp.toLocaleString()}\n`);
-
-      if (result.data.length > 0) {
-        console.log('🏘️  Property Listings:\n');
+    for (let i = 0; i < targetUrls.length; i++) {
+      const targetUrl = targetUrls[i];
+      console.log(`🚀 [${i + 1}/${targetUrls.length}] Enhanced scraping: ${targetUrl!.split('neighborhood=')[1] ? 'neighborhood ' + targetUrl!.split('neighborhood=')[1] : 'location ' + (i + 1)}...`);
+      
+      try {
+        const result = await enhancedScraperService.scrapeProperties(targetUrl!);
         
-        // Show first 5 properties in console
-        const displayProperties = result.data.slice(0, 5);
-        displayProperties.forEach((property: PropertyItem, index: number) => {
-          console.log(`--- Property ${index + 1} ---`);
-          console.log(`🏠 Title: ${property.title}`);
-          console.log(`💰 Price: ${property.price}`);
-          console.log(`📍 Location: ${property.location}`);
-          console.log(`🏠 Rooms: ${property.rooms}`);
-          console.log(`🔢 Floor: ${property.floor}`);
-          console.log(`🆔 ID: ${property.id}`);
-          console.log(''); // Empty line for spacing
-        });
-        
-        if (result.data.length > 5) {
-          console.log(`... and ${result.data.length - 5} more properties\n`);
+        if (result.success) {
+          console.log(`✅ [${i + 1}/${targetUrls.length}] Success: ${result.totalItems} properties found`);
+          allProperties.push(...result.data);
+          totalSuccessful++;
+        } else {
+          console.error(`❌ [${i + 1}/${targetUrls.length}] Failed: ${result.error}`);
+          totalFailed++;
         }
-        
-        // Filter out properties with missing critical data
-        const filteredProperties = result.data.filter((property: PropertyItem) => 
-          property.link !== '' && 
-          property.price !== 'Price not found'
-        );
-        
-        console.log(`📊 Filtered properties: ${filteredProperties.length} (removed ${result.data.length - filteredProperties.length} incomplete entries)\n`);
+      } catch (error) {
+        console.error(`💥 [${i + 1}/${targetUrls.length}] Unexpected error:`, error);
+        totalFailed++;
+      }
+    }
 
-        // Export to CSV
+    console.log('\n📊 Enhanced Scraping Summary:');
+    console.log(`✅ Successful: ${totalSuccessful}/${targetUrls.length} URLs`);
+    console.log(`❌ Failed: ${totalFailed}/${targetUrls.length} URLs`);
+    console.log(`📊 Total properties found: ${allProperties.length}\n`);
+
+    if (allProperties.length > 0) {
+      console.log('🏘️  Combined Property Listings:\n');
+      
+      // Show first 5 properties in console
+      const displayProperties = allProperties.slice(0, 5);
+      displayProperties.forEach((property: PropertyItem, index: number) => {
+        console.log(`--- Property ${index + 1} ---`);
+        console.log(`🏠 Title: ${property.title}`);
+        console.log(`💰 Price: ${property.price}`);
+        console.log(`📍 Location: ${property.location}`);
+        console.log(`🏠 Rooms: ${property.rooms}`);
+        console.log(`🔢 Floor: ${property.floor}`);
+        console.log(`🆔 ID: ${property.id}`);
+        console.log(''); // Empty line for spacing
+      });
+      
+      if (allProperties.length > 5) {
+        console.log(`... and ${allProperties.length - 5} more properties\n`);
+      }
+      
+      // Filter out properties with missing critical data
+      const filteredProperties = allProperties.filter((property: PropertyItem) => 
+        property.link !== '' && 
+        property.price !== 'Price not found'
+      );
+      
+      console.log(`📊 Filtered properties: ${filteredProperties.length} (removed ${allProperties.length - filteredProperties.length} incomplete entries)\n`);
+
+      // Export to CSV
+      try {
+        console.log('📄 Exporting to CSV...');
+        const csvPath = await csvExportService.exportToCSVEnhanced(filteredProperties);
+        console.log(`✅ CSV export completed: ${csvPath}`);
+        console.log(`📊 Exported ${filteredProperties.length} properties with enhanced data`);
+      } catch (error) {
+        console.error('❌ CSV export failed:', error);
+      }
+
+      // Save to Database if --db flag is provided
+      const args = process.argv.slice(2);
+      const saveToDatabase = args.includes('--db') || args.includes('--database');
+      
+      if (saveToDatabase) {
         try {
-          console.log('📄 Exporting to CSV...');
-          const csvPath = await csvExportService.exportToCSVEnhanced(filteredProperties);
-          console.log(`✅ CSV export completed: ${csvPath}`);
-        } catch (error) {
-          console.error('❌ CSV export failed:', error);
-        }
-
-        // Save to Database if --db flag is provided
-        const args = process.argv.slice(2);
-        const saveToDatabase = args.includes('--db') || args.includes('--database');
-        
-        if (saveToDatabase) {
-          try {
-            console.log('📀 Saving to database...');
-            const dbResult = await scraperDatabaseService.scrapeAndSaveToDatabase(targetUrl, {
+          console.log('📀 Saving to database...');
+          let totalInserted = 0;
+          let totalUpdated = 0;
+          let totalSkipped = 0;
+          
+          for (let i = 0; i < targetUrls.length; i++) {
+            const targetUrl = targetUrls[i];
+            console.log(`📀 [${i + 1}/${targetUrls.length}] Saving data from: ${targetUrl!.split('neighborhood=')[1] ? 'neighborhood ' + targetUrl!.split('neighborhood=')[1] : 'location ' + (i + 1)}...`);
+            
+            const dbResult = await scraperDatabaseService.scrapeAndSaveToDatabase(targetUrl!, {
               exportCsv: false, // We already exported to CSV above
-              cleanOldData: true,
+              cleanOldData: i === 0, // Only clean on first URL
               cleanOldDays: 30
             });
             
-            if (dbResult.success) {
-              console.log('✅ Database save completed successfully!');
-              console.log(`📀 Database Stats: ${dbResult.dbStats?.inserted} new, ${dbResult.dbStats?.updated} updated, ${dbResult.dbStats?.skipped} skipped`);
-              console.log(`📊 Total in database: ${dbResult.dbStats?.totalInDb}`);
-            } else {
-              console.error('❌ Database save failed:', dbResult.error);
+            if (dbResult.success && dbResult.dbStats) {
+              totalInserted += dbResult.dbStats.inserted || 0;
+              totalUpdated += dbResult.dbStats.updated || 0;
+              totalSkipped += dbResult.dbStats.skipped || 0;
             }
-          } catch (error) {
-            console.error('❌ Database operation failed:', error);
           }
-        } else {
-          console.log('💡 To save to database, add --db flag: npm run dev:enhanced -- --db');
+          
+          console.log('✅ Database save completed successfully!');
+          console.log(`📀 Combined Database Stats: ${totalInserted} new, ${totalUpdated} updated, ${totalSkipped} skipped`);
+        } catch (error) {
+          console.error('❌ Database operation failed:', error);
         }
       } else {
-        console.log('⚠️  No properties found with enhanced scraping.');
+        console.log('💡 To save to database, add --db flag: npm run dev:enhanced -- --db');
       }
     } else {
-      console.error('❌ Enhanced Puppeteer scraping failed:');
-      console.error(`Error: ${result.error}`);
+      console.log('⚠️  No properties found with enhanced scraping from any URL.');
     }
   } catch (error) {
     console.error('💥 Unexpected error with enhanced scraping:', error);
@@ -167,36 +222,76 @@ async function scrapeWithEnhancedPuppeteer(): Promise<void> {
 }
 
 /**
- * Function to scrape with database-first approach (integrated scraping and database saving)
+ * Function to scrape with database-first approach (integrated scraping and database saving) for multiple URLs
  */
 async function scrapeWithDatabaseIntegration(): Promise<void> {
+  let totalItems = 0;
+  let totalInserted = 0;
+  let totalUpdated = 0;
+  let totalSkipped = 0;
+  let totalSuccessful = 0;
+  let totalFailed = 0;
+
   try {
     console.log('🚀 Starting integrated scraping with database...');
+    console.log(`📍 Target URLs: ${targetUrls.length} locations`);
     console.log('⚠️  This will open a browser window - please don\'t close it during scraping\n');
     
-    const result = await scraperDatabaseService.scrapeAndSaveToDatabase(targetUrl, {
-      exportCsv: true,         // Export to CSV as well
-      cleanOldData: true,      // Clean old data
-      cleanOldDays: 30         // Keep data for 30 days
-    });
-    
-    if (result.success) {
-      console.log('✅ Integrated scraping and database save completed!');
-      console.log(`📊 Total properties scraped: ${result.totalItems}`);
-      console.log(`📀 Database: ${result.dbStats?.inserted} new, ${result.dbStats?.updated} updated, ${result.dbStats?.skipped} skipped`);
-      console.log(`📊 Total in database: ${result.dbStats?.totalInDb}`);
+    for (let i = 0; i < targetUrls.length; i++) {
+      const targetUrl = targetUrls[i];
+      console.log(`🔄 [${i + 1}/${targetUrls.length}] Integrated scraping: ${targetUrl!.split('neighborhood=')[1] ? 'neighborhood ' + targetUrl!.split('neighborhood=')[1] : 'location ' + (i + 1)}...`);
       
-      if (result.dbStats?.statistics) {
-        console.log('\n📊 Database Statistics:');
-        console.log(`   Today's Properties: ${result.dbStats.statistics.todayProperties}`);
-        console.log(`   Average Price: ₪${result.dbStats.statistics.avgPrice}`);
-        console.log(`   Top Locations:`);
-        result.dbStats.statistics.locationCounts.slice(0, 5).forEach((loc: any, index: number) => {
-          console.log(`     ${index + 1}. ${loc.location}: ${loc.count} properties`);
+      try {
+        const result = await scraperDatabaseService.scrapeAndSaveToDatabase(targetUrl!, {
+          exportCsv: i === targetUrls.length - 1, // Export CSV only on last URL
+          cleanOldData: i === 0,      // Clean old data only on first URL
+          cleanOldDays: 30         // Keep data for 30 days
         });
+        
+        if (result.success) {
+          console.log(`✅ [${i + 1}/${targetUrls.length}] Success: ${result.totalItems} properties processed`);
+          totalItems += result.totalItems || 0;
+          totalInserted += result.dbStats?.inserted || 0;
+          totalUpdated += result.dbStats?.updated || 0;
+          totalSkipped += result.dbStats?.skipped || 0;
+          totalSuccessful++;
+        } else {
+          console.error(`❌ [${i + 1}/${targetUrls.length}] Failed: ${result.error}`);
+          totalFailed++;
+        }
+      } catch (error) {
+        console.error(`💥 [${i + 1}/${targetUrls.length}] Unexpected error:`, error);
+        totalFailed++;
       }
-    } else {
-      console.error('❌ Integrated scraping failed:', result.error);
+    }
+    
+    console.log('\n📊 Integrated Scraping Summary:');
+    console.log(`✅ Successful: ${totalSuccessful}/${targetUrls.length} URLs`);
+    console.log(`❌ Failed: ${totalFailed}/${targetUrls.length} URLs`);
+    console.log(`📊 Total properties scraped: ${totalItems}`);
+    console.log(`📀 Combined Database Stats: ${totalInserted} new, ${totalUpdated} updated, ${totalSkipped} skipped`);
+    
+    // Get final statistics from the last successful scrape
+    if (totalSuccessful > 0) {
+      try {
+        const finalResult = await scraperDatabaseService.scrapeAndSaveToDatabase(targetUrls[0]!, {
+          exportCsv: false,
+          cleanOldData: false,
+          cleanOldDays: 30
+        });
+        
+        if (finalResult.dbStats?.statistics) {
+          console.log('\n📊 Final Database Statistics:');
+          console.log(`   Today's Properties: ${finalResult.dbStats.statistics.todayProperties}`);
+          console.log(`   Average Price: ₪${finalResult.dbStats.statistics.avgPrice}`);
+          console.log(`   Top Locations:`);
+          finalResult.dbStats.statistics.locationCounts.slice(0, 5).forEach((loc: any, index: number) => {
+            console.log(`     ${index + 1}. ${loc.location}: ${loc.count} properties`);
+          });
+        }
+      } catch (error) {
+        console.warn('⚠️ Could not fetch final statistics:', error);
+      }
     }
   } catch (error) {
     console.error('💥 Unexpected error with integrated scraping:', error);
@@ -222,22 +317,30 @@ function formatPropertiesForExport(properties: PropertyItem[]): object[] {
 }
 
 /**
- * Example function to demonstrate how to use the scraper programmatically
+ * Example function to demonstrate how to use the scraper programmatically with multiple URLs
  */
 async function getPropertiesData(): Promise<PropertyItem[]> {
-  // Try basic scraper first
-  let result = await basicScraperService.scrapeProperties(targetUrl);
+  let allProperties: PropertyItem[] = [];
   
-  // If basic scraper fails due to bot protection, use enhanced Puppeteer
-  if (!result.success && result.error?.includes('Bot protection')) {
-    try {
-      result = await enhancedScraperService.scrapeProperties(targetUrl);
-    } finally {
-      await enhancedScraperService.closeBrowser();
+  for (const targetUrl of targetUrls) {
+    // Try basic scraper first
+    let result = await basicScraperService.scrapeProperties(targetUrl);
+    
+    // If basic scraper fails due to bot protection, use enhanced Puppeteer
+    if (!result.success && result.error?.includes('Bot protection')) {
+      try {
+        result = await enhancedScraperService.scrapeProperties(targetUrl);
+      } finally {
+        await enhancedScraperService.closeBrowser();
+      }
+    }
+    
+    if (result.success) {
+      allProperties.push(...result.data);
     }
   }
   
-  return result.success ? result.data : [];
+  return allProperties;
 }
 
 // Check command line arguments to determine which scraper to use
@@ -249,16 +352,17 @@ const useIntegrated = args.includes('--integrated') || args.includes('-i');
 console.log('🎯 Scraping Mode Detection:');
 console.log(`   Enhanced: ${useEnhancedOnly}`);
 console.log(`   Database: ${useDatabase}`);
-console.log(`   Integrated: ${useIntegrated}\n`);
+console.log(`   Integrated: ${useIntegrated}`);
+console.log(`   URLs to scrape: ${targetUrls.length}\n`);
 
 if (useIntegrated) {
-  console.log('🔄 Using integrated scraping mode (scraping + database + CSV)\n');
+  console.log('🔄 Using integrated scraping mode (scraping + database + CSV) for multiple URLs\n');
   scrapeWithDatabaseIntegration().catch(console.error);
 } else if (useEnhancedOnly) {
-  console.log('🚀 Using Enhanced Puppeteer mode only\n');
+  console.log('🚀 Using Enhanced Puppeteer mode only for multiple URLs\n');
   scrapeWithEnhancedPuppeteer().catch(console.error);
 } else {
-  console.log('🔧 Using fallback strategy (Basic → Enhanced)\n');
+  console.log('🔧 Using fallback strategy (Basic → Enhanced) for multiple URLs\n');
   scrapeProperties().catch(console.error);
 }
 
