@@ -74,7 +74,7 @@ export class DatabaseService {
         description TEXT,
         image_url TEXT,
         link TEXT NOT NULL,
-        isWhatsappMessageSent BOOLEAN DEFAULT FALSE,
+        notified_at TIMESTAMP NULL DEFAULT NULL,
         scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_location (location),
@@ -82,7 +82,7 @@ export class DatabaseService {
         INDEX idx_rooms (rooms),
         INDEX idx_scraped_at (scraped_at),
         INDEX idx_link (link),
-        INDEX idx_whatsapp_sent (isWhatsappMessageSent)
+        INDEX idx_notified_at (notified_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `;
 
@@ -111,8 +111,8 @@ export class DatabaseService {
 
     const upsertQuery = `
       INSERT INTO rental_apartments 
-      (id, title, price, location, rooms, floor, description, image_url, link, isWhatsappMessageSent)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE)
+      (id, title, price, location, rooms, floor, description, image_url, link)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         title = VALUES(title),
         price = VALUES(price),
@@ -335,9 +335,9 @@ export class DatabaseService {
   }
 
   /**
-   * Get all properties where WhatsApp message has not been sent
+   * Get all properties that have not been notified yet
    */
-  async getPropertiesWithoutWhatsAppMessage(): Promise<PropertyItem[]> {
+  async getUnnotifiedProperties(): Promise<PropertyItem[]> {
     if (!this.connection) {
       throw new Error('Database connection not established');
     }
@@ -353,44 +353,59 @@ export class DatabaseService {
         description,
         image_url as imageUrl,
         link,
-        isWhatsappMessageSent,
+        notified_at,
         scraped_at,
         updated_at
       FROM rental_apartments 
-      WHERE isWhatsappMessageSent = FALSE
+      WHERE notified_at IS NULL
       ORDER BY scraped_at DESC
     `;
 
     try {
       const [rows] = await this.connection.execute(query);
-      return rows as PropertyItem[];
+      const items = (rows as any[]).map(row => ({
+        id: row.id,
+        title: row.title,
+        price: row.price,
+        location: row.location,
+        rooms: row.rooms,
+        floor: row.floor,
+        description: row.description,
+        imageUrl: row.imageUrl,
+        link: row.link,
+        area: row.area || '',
+        contactInfo: 'Contact info not available'
+      }));
+      return items as PropertyItem[];
     } catch (error) {
-      console.error('❌ Failed to get properties without WhatsApp message:', error);
+      console.error('❌ Failed to get unnotified properties:', error);
       throw error;
     }
   }
 
   /**
-   * Mark all properties as WhatsApp message sent
+   * Mark specific properties as notified
    */
-  async markAllPropertiesAsWhatsAppSent(): Promise<number> {
+  async markAsNotified(ids: string[]): Promise<number> {
     if (!this.connection) {
       throw new Error('Database connection not established');
     }
+    if (ids.length === 0) return 0;
 
+    const placeholders = ids.map(() => '?').join(',');
     const query = `
       UPDATE rental_apartments 
-      SET isWhatsappMessageSent = TRUE, updated_at = CURRENT_TIMESTAMP
-      WHERE isWhatsappMessageSent = FALSE
+      SET notified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id IN (${placeholders})
     `;
 
     try {
-      const [result] = await this.connection.execute(query);
+      const [result] = await this.connection.execute(query, ids);
       const affectedRows = (result as any).affectedRows || 0;
-      console.log(`✅ Marked ${affectedRows} properties as WhatsApp message sent`);
+      console.log(`✅ Marked ${affectedRows} properties as notified`);
       return affectedRows;
     } catch (error) {
-      console.error('❌ Failed to mark properties as WhatsApp sent:', error);
+      console.error('❌ Failed to mark properties as notified:', error);
       throw error;
     }
   }

@@ -278,8 +278,8 @@ export class Yad2ScraperService {
         '.item-contact'
       ]) || 'Contact info not available';
 
-      // Generate a unique ID (you might want to extract actual ID from the element)
-      const id = this.generatePropertyId($element, title, price);
+      // Generate a unique ID (extract from URL or element, deterministic fallback)
+      const id = this.generatePropertyId($element, title, price, link);
 
       // Only return the property if we have at least title and price
       if (title !== 'No title available' || price !== 'Price not available') {
@@ -346,17 +346,23 @@ export class Yad2ScraperService {
   }
 
   /**
-   * Generates a unique property ID
+   * Generates a unique property ID (deterministic for deduplication)
    */
-  private generatePropertyId($element: cheerio.Cheerio<any>, title: string, price: string): string {
-    // Try to extract actual ID from element attributes
+  private generatePropertyId($element: cheerio.Cheerio<any>, title: string, price: string, link: string): string {
+    // Extract Yad2 listing ID from URL: /item/12345678
+    const urlMatch = link.match(/\/item\/(\w+)/);
+    if (urlMatch && urlMatch[1]) {
+      return urlMatch[1];
+    }
+
+    // Fallback: element attributes
     const actualId = $element.attr('data-id') || $element.attr('id') || '';
     if (actualId) {
       return actualId;
     }
 
-    // Generate hash-like ID based on title and price
+    // Final fallback: deterministic hash from title and price (no Date.now())
     const combined = `${title}-${price}`;
-    return combined.replace(/[^a-zA-Z0-9]/g, '').substring(0, 16) + '-' + Date.now().toString(36);
+    return combined.replace(/[^a-zA-Z0-9]/g, '').substring(0, 32);
   }
 } 

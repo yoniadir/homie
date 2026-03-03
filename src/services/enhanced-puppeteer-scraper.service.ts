@@ -1,5 +1,9 @@
-import puppeteer, { Browser, Page } from 'puppeteer';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import { Browser, Page } from 'puppeteer';
 import { PropertyItem, ScrapingResult } from '../interfaces/property.interface';
+
+puppeteer.use(StealthPlugin());
 
 export class EnhancedPuppeteerScraperService {
   private browser: Browser | null = null;
@@ -8,7 +12,7 @@ export class EnhancedPuppeteerScraperService {
     if (!this.browser) {
       // Detect if running in Docker
       const isDocker = process.env.DOCKER_ENV === 'true' || process.env.NODE_ENV === 'production';
-      
+
       this.browser = await puppeteer.launch({
         headless: isDocker,
         ...(isDocker && { executablePath: '/usr/bin/google-chrome-stable' }),
@@ -29,18 +33,13 @@ export class EnhancedPuppeteerScraperService {
           '--disable-background-networking',
           '--disable-breakpad',
           '--disable-component-extensions-with-background-pages',
-          '--disable-dev-shm-usage',
-          '--disable-extensions',
           '--disable-features=TranslateUI,BlinkGenPropertyTrees',
           '--disable-hang-monitor',
           '--disable-prompt-on-repost',
           '--disable-sync',
-          '--disable-web-security',
           '--metrics-recording-only',
           '--no-default-browser-check',
-          '--no-first-run',
           '--safebrowsing-disable-auto-update',
-          '--enable-automation',
           '--password-store=basic',
           '--use-mock-keychain'
         ]

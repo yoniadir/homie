@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS `rental_apartments` (
   `description` TEXT,
   `image_url` TEXT,
   `link` TEXT NOT NULL,
-  `isWhatsappMessageSent` BOOLEAN DEFAULT FALSE,
+  `notified_at` TIMESTAMP NULL DEFAULT NULL,
   `scraped_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX `idx_location` (`location`),
@@ -17,5 +17,5 @@ CREATE TABLE IF NOT EXISTS `rental_apartments` (
   INDEX `idx_rooms` (`rooms`),
   INDEX `idx_scraped_at` (`scraped_at`),
   INDEX `idx_link` (`link`),
-  INDEX `idx_whatsapp_sent` (`isWhatsappMessageSent`)
+  INDEX `idx_notified_at` (`notified_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci; 

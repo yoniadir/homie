@@ -1,17 +1,20 @@
 import { EnhancedPuppeteerScraperService } from './enhanced-puppeteer-scraper.service';
 import { DatabaseService } from './database.service';
 import { CsvExportService } from './csv-export.service';
+import { TelegramService } from './telegram.service';
 import { ScrapingResult } from '../interfaces/property.interface';
 
 export class ScraperDatabaseService {
   private scraper: EnhancedPuppeteerScraperService;
   private database: DatabaseService;
   private csvExport: CsvExportService;
+  private telegramService: TelegramService;
 
   constructor() {
     this.scraper = new EnhancedPuppeteerScraperService();
     this.database = new DatabaseService();
     this.csvExport = new CsvExportService();
+    this.telegramService = new TelegramService();
   }
 
   /**
@@ -55,9 +58,18 @@ export class ScraperDatabaseService {
       // Save to database (only properties with links)
       const { inserted, updated, skipped } = await this.database.upsertProperties(filteredProperties);
 
+      // Send Telegram notifications for unnotified properties
+      if (this.telegramService.isConfigured()) {
+        const unnotified = await this.database.getUnnotifiedProperties();
+        if (unnotified.length > 0) {
+          console.log(`📱 Sending Telegram notifications for ${unnotified.length} new properties...`);
+          await this.telegramService.sendBatch(unnotified);
+          await this.database.markAsNotified(unnotified.map((p) => p.id));
+        }
+      }
+
       // Export to CSV if requested
       if (options.exportCsv) {
-
         await this.csvExport.exportToCSVEnhanced(filteredProperties);
       }
 
