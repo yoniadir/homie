@@ -2,542 +2,563 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { Browser, Page } from 'puppeteer';
 import { PropertyItem, ScrapingResult } from '../interfaces/property.interface';
+import path from 'path';
 
 puppeteer.use(StealthPlugin());
 
+const USER_AGENTS = [
+  {
+    ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="133", "Google Chrome";v="133", "Not-A.Brand";v="99"',
+    platform: 'macOS',
+  },
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="133", "Google Chrome";v="133", "Not-A.Brand";v="99"',
+    platform: 'Windows',
+  },
+  {
+    ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="132", "Google Chrome";v="132", "Not-A.Brand";v="99"',
+    platform: 'macOS',
+  },
+  {
+    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    secChUa: '"Chromium";v="131", "Google Chrome";v="131", "Not-A.Brand";v="99"',
+    platform: 'Windows',
+  },
+];
+
+const MAX_RETRIES = 3;
+const RETRY_DELAYS_MS = [30_000, 60_000, 120_000];
+
 export class EnhancedPuppeteerScraperService {
   private browser: Browser | null = null;
+  private chosenUA = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]!;
+  private homepageWarmedUp = false;
 
   async initBrowser(): Promise<void> {
-    if (!this.browser) {
-      // Detect if running in Docker
-      const isDocker = process.env.DOCKER_ENV === 'true' || process.env.NODE_ENV === 'production';
+    if (this.browser) return;
 
-      this.browser = await puppeteer.launch({
-        headless: isDocker,
-        ...(isDocker && { executablePath: '/usr/bin/google-chrome-stable' }),
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-blink-features=AutomationControlled',
-          '--no-first-run',
-          '--disable-extensions',
-          '--disable-default-apps',
-          '--disable-web-security',
-          '--disable-features=VizDisplayCompositor',
-          '--disable-ipc-flooding-protection',
-          '--disable-renderer-backgrounding',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-background-timer-throttling',
-          '--disable-background-networking',
-          '--disable-breakpad',
-          '--disable-component-extensions-with-background-pages',
-          '--disable-features=TranslateUI,BlinkGenPropertyTrees',
-          '--disable-hang-monitor',
-          '--disable-prompt-on-repost',
-          '--disable-sync',
-          '--metrics-recording-only',
-          '--no-default-browser-check',
-          '--safebrowsing-disable-auto-update',
-          '--password-store=basic',
-          '--use-mock-keychain'
-        ]
-      });
+    const isDocker = process.env.DOCKER_ENV === 'true' || process.env.NODE_ENV === 'production';
+    const profileDir = path.resolve(process.cwd(), 'browser-profile');
+
+    const args = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+    ];
+
+    const proxyUrl = process.env.PROXY_URL;
+    if (proxyUrl) {
+      const cleaned = proxyUrl.replace(/\/+$/, '');
+      args.push(`--proxy-server=${cleaned}`);
+      console.log(`🌐 Using proxy: ${cleaned.replace(/:[^:@]+@/, ':***@')}`);
     }
+
+    this.browser = await puppeteer.launch({
+      headless: isDocker,
+      ...(isDocker && { executablePath: '/usr/bin/google-chrome-stable' }),
+      userDataDir: profileDir,
+      args,
+    });
   }
 
   async closeBrowser(): Promise<void> {
     if (this.browser) {
       await this.browser.close();
       this.browser = null;
+      this.homepageWarmedUp = false;
     }
   }
 
   async scrapeProperties(url: string): Promise<ScrapingResult> {
     let allProperties: PropertyItem[] = [];
     let currentPage = 1;
-    let maxPages = 5; // Reduced from 10 for more reasonable limit
-    
+    const maxPages = 5;
+
     try {
       await this.initBrowser();
-      
-      if (!this.browser) {
-        throw new Error('Failed to initialize browser');
-      }
+      if (!this.browser) throw new Error('Failed to initialize browser');
 
       console.log('🔍 Starting multi-page scraping...');
-      
-      // Always try at least 2 pages for this specific site
-      const minPages = 1;
-      
+
       while (currentPage <= maxPages) {
         console.log(`📄 Scraping page ${currentPage}...`);
-        
-        // Construct URL for current page
         const pageUrl = this.addPageParameter(url, currentPage);
-        
-        // Scrape this page
-        const pageResult = await this.scrapeSinglePage(pageUrl);
-        
+
+        const pageResult = await this.scrapeSinglePageWithRetry(pageUrl);
+
         if (!pageResult.success) {
           console.warn(`⚠️ Failed to scrape page ${currentPage}: ${pageResult.error}`);
           break;
         }
-        
-        // If no properties found on this page, we've reached the end
+
         if (pageResult.data.length === 0) {
           console.log(`📄 No properties found on page ${currentPage}, stopping pagination`);
           break;
         }
-        
-        // Add properties from this page
+
         allProperties = [...allProperties, ...pageResult.data];
         console.log(`✅ Page ${currentPage} scraped: ${pageResult.data.length} properties (Total: ${allProperties.length})`);
-        
-        // For the first page, always try page 2 (don't rely on pagination detection)
-        if (currentPage === 1) {
-          console.log(`📄 Completed page 1, trying page 2...`);
-          currentPage++;
-          await this.randomDelay(5000, 8000); // Longer delay between pages
-          continue;
-        }
-        
-        // For subsequent pages, check for next page
-        const hasNextPage = await this.checkForNextPage(pageUrl);
-        if (!hasNextPage) {
+
+        const hasNext = pageResult._hasNextPage ?? (currentPage === 1);
+        if (!hasNext) {
           console.log(`📄 Reached last page (${currentPage})`);
           break;
         }
-        
+
         currentPage++;
-        
-        // Add delay between pages to avoid being blocked
-        await this.randomDelay(5000, 8000);
+        await this.randomDelay(8000, 15000);
       }
 
       return {
         success: true,
         data: allProperties,
         timestamp: new Date(),
-        totalItems: allProperties.length
+        totalItems: allProperties.length,
       };
-
     } catch (error) {
       console.error('❌ Multi-page scraping failed:', error);
-      
       return {
         success: false,
         data: allProperties,
         error: error instanceof Error ? error.message : 'Unknown error occurred',
         timestamp: new Date(),
-        totalItems: allProperties.length
+        totalItems: allProperties.length,
       };
     }
   }
 
-  private async scrapeSinglePage(url: string): Promise<ScrapingResult> {
+  // ── Retry wrapper ──────────────────────────────────────────────
+
+  private async scrapeSinglePageWithRetry(url: string): Promise<ScrapingResult & { _hasNextPage?: boolean }> {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const result = await this.scrapeSinglePage(url);
+
+      if (result.success) return result;
+
+      const isCaptcha = (result.error ?? '').toLowerCase().includes('bot protection');
+      if (!isCaptcha || attempt === MAX_RETRIES) return result;
+
+      const delay = RETRY_DELAYS_MS[attempt] ?? 120_000;
+      console.log(`⏳ Captcha detected, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+
+    return { success: false, data: [], error: 'Exhausted retries', timestamp: new Date(), totalItems: 0 };
+  }
+
+  // ── Core single-page scraper ───────────────────────────────────
+
+  private async scrapeSinglePage(url: string): Promise<ScrapingResult & { _hasNextPage?: boolean }> {
     let page: Page | null = null;
-    
+
     try {
-      if (!this.browser) {
-        throw new Error('Browser not initialized');
+      if (!this.browser) throw new Error('Browser not initialized');
+      page = await this.browser.newPage();
+
+      await this.applyStealthOverrides(page);
+      await this.setViewportAndHeaders(page);
+
+      if (!this.homepageWarmedUp) {
+        await this.warmUpWithHomepage(page);
       }
 
-      page = await this.browser.newPage();
-      
-      // Enhanced stealth - remove automation indicators
-      await page.evaluateOnNewDocument(() => {
-        // Remove webdriver property completely
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => undefined,
-        });
-        
-        // Override the plugins property to return a fake but reasonable plugins array
-        Object.defineProperty(navigator, 'plugins', {
-          get: () => [
-            {
-              0: {
-                type: "application/x-google-chrome-pdf",
-                suffixes: "pdf",
-                description: "Portable Document Format",
-                enabledPlugin: null
-              },
-              description: "Portable Document Format",
-              filename: "internal-pdf-viewer",
-              length: 1,
-              name: "Chrome PDF Plugin"
-            },
-            {
-              0: {
-                type: "application/pdf",
-                suffixes: "pdf",
-                description: "Portable Document Format",
-                enabledPlugin: null
-              },
-              description: "Portable Document Format",
-              filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
-              length: 1,
-              name: "Chrome PDF Viewer"
-            }
-          ],
-        });
-        
-        // Mock languages
-        Object.defineProperty(navigator, 'languages', {
-          get: () => ['en-US', 'en', 'he'],
-        });
-        
-        // Mock permissions
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters: any) => originalQuery(parameters);
-        
-        // Override chrome runtime
-        Object.defineProperty(window, 'chrome', {
-          writable: true,
-          enumerable: true,
-          configurable: false,
-          value: {
-            runtime: {}
-          }
-        });
-        
-        // Mock screen properties
-        Object.defineProperty(screen, 'availWidth', { value: 1920 });
-        Object.defineProperty(screen, 'availHeight', { value: 1080 });
-        Object.defineProperty(screen, 'width', { value: 1920 });
-        Object.defineProperty(screen, 'height', { value: 1080 });
-      });
+      await this.randomDelay(3000, 6000);
 
-      // Set more realistic viewport and user agent
-      await page.setViewport({ 
-        width: 1920, 
-        height: 1080,
-        deviceScaleFactor: 1,
-        isMobile: false,
-        hasTouch: false,
-        isLandscape: true
-      });
-      
-      // Rotate user agents
-      const userAgents = [
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15'
-      ];
-      
-      const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)] || userAgents[0]!;
-      await page.setUserAgent(randomUA);
-
-      // Set additional headers to look more like a real browser
-      await page.setExtraHTTPHeaders({
-        'Accept-Language': 'en-US,en;q=0.9,he;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-        'Upgrade-Insecure-Requests': '1',
-        'Cache-Control': 'max-age=0'
-      });
-
-      // Add much longer delay before navigation
-      await this.randomDelay(5000, 10000);
-
-      // Navigate with more realistic behavior
       console.log(`🔍 Navigating to: ${url}`);
-      await page.goto(url, { 
-        waitUntil: 'domcontentloaded',
-        timeout: 45000 
-      });
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 60_000 });
 
-      // More extensive human behavior simulation
-      await this.simulateExtensiveHumanBehavior(page);
+      await this.simulateHumanBehavior(page);
 
-      // Check for bot protection
-      const title = await page.title();
-      console.log(`📄 Page title: ${title}`);
-
-      if (title.includes('ShieldSquare') || title.includes('Captcha') || title.includes('Access Denied')) {
-        console.warn('🚫 Bot protection detected, trying advanced evasion...');
-        
-        // Try clicking somewhere on the page
-        await page.mouse.click(Math.random() * 800, Math.random() * 600);
-        await this.randomDelay(2000, 4000);
-        
-        // Try scrolling
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight / 4);
-        });
-        await this.randomDelay(3000, 6000);
-        
-        // Try typing something (simulate search)
-        await page.keyboard.type('test', { delay: 100 });
-        await this.randomDelay(1000, 3000);
-        
-        // Wait much longer
-        await this.randomDelay(15000, 25000);
-        
-        // Check again
-        const newTitle = await page.title();
-        if (newTitle.includes('ShieldSquare') || newTitle.includes('Captcha') || newTitle.includes('Access Denied')) {
+      const blocked = await this.isBotProtectionActive(page);
+      if (blocked) {
+        console.warn('🚫 Bot protection detected, trying patient evasion...');
+        const resolved = await this.handleCaptchaPatient(page);
+        if (!resolved) {
           return {
             success: false,
             data: [],
-            error: 'Bot protection is still active. Try: 1) Using VPN/different IP, 2) Waiting longer between requests, 3) Manual browsing first',
+            error: 'Bot protection is still active after patient wait',
             timestamp: new Date(),
-            totalItems: 0
+            totalItems: 0,
           };
         }
+        console.log('✅ Bot protection resolved');
       }
 
-      // Wait longer for content to load
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await this.randomDelay(3000, 5000);
 
-      // Extract properties with detailed logic
-      const properties = await page.evaluate(() => {
-        const items: any[] = [];
-        
-        // Look for Yad2-specific property selectors
-        const selectors = [
-          '[data-testid="feed-list"]',
-          '.feeditem',
-          '.item-card',
-          '.property-card',
-          'article',
-          '.listing',
-          '.feed-item',
-          '[class*="item"]',
-          '[class*="card"]',
-          '.item',
-          '.result-item'
-        ];
-
-        console.log('🔍 Searching for property elements...');
-        
-        for (const selector of selectors) {
-          const container = document.querySelector(selector);
-          if (container) {
-            console.log(`✅ Found container with selector: ${selector}`);
-            
-            // Try to find individual property items within the container
-            const itemSelectors = [
-              'div[class*="item"]',
-              'div[class*="card"]',
-              'article',
-              'li',
-              'div[data-testid*="item"]',
-              'div[data-testid*="card"]',
-              'div[class*="property"]',
-              'div[class*="listing"]'
-            ];
-            
-            for (const itemSelector of itemSelectors) {
-              const propertyElements = container.querySelectorAll(itemSelector);
-              if (propertyElements.length > 0) {
-                console.log(`📋 Found ${propertyElements.length} property elements with: ${itemSelector}`);
-                
-                propertyElements.forEach((element, index) => {
-                  try {
-                    // Extract all text content for analysis
-                    const textContent = element.textContent?.trim() || '';
-                    const innerHtml = element.innerHTML;
-                    
-                    const priceElement = element.querySelector('.feed-item-price_price__ygoeF');
-                    const price = priceElement ? priceElement.textContent?.trim() || '' : '';
-                    
-                    // Look for room indicators
-                    const roomMatch = textContent.match(/(\d+)\s*חדר/);
-                    const rooms = roomMatch ? roomMatch[1] + ' rooms' : '';
-
-                    // Look for floor number - get the second element with this class and extract floor number
-                    const floorElements = element.querySelectorAll('.item-data-content_itemInfoLine__AeoPP');
-                    const floorText = floorElements.length > 1 && floorElements[1] ? floorElements[1].textContent?.trim() || '' : '';
-                    const floorMatch = floorText.match(/קומה\s*‎?(\d+)‏?/);
-                    const floor = floorMatch ? `קומה ${floorMatch[1]}` : '';
-                    
-                    // Look for area indicators  
-                    const areaMatch = textContent.match(/(\d+)\s*מ["']ר|(\d+)\s*מטר|(\d+)\s*sqm/);
-                    const area = areaMatch ? (areaMatch[1] || areaMatch[2] || areaMatch[3]) + ' מ"ר' : '';
-                    
-                    // Extract location from the heading element
-                    const locationElement = element.querySelector('.item-data-content_heading__tphH4');
-                    const location = locationElement ? locationElement.textContent?.trim() || '' : '';
-                    
-                    // Extract images
-                    const img = element.querySelector('img');
-                    const imageUrl = img ? (img.getAttribute('src') || img.getAttribute('data-src') || '') : '';
-                    
-                    // Extract links
-                    const link = element.querySelector('a');
-                    const href = link ? link.getAttribute('href') || '' : '';
-                    
-                    // Extract property ID from the link
-                    const fullLink = href.startsWith('http') ? href : (href ? 'https://www.yad2.co.il' + href : '');
-                    const propertyId = (() => {
-                      try {
-                        // Extract ID from URL pattern: /realestate/item/{ID}
-                        const linkMatch = fullLink.match(/\/realestate\/item\/([^?\/]+)/);
-                        return linkMatch ? linkMatch[1] : `property-${Date.now()}-${index}`;
-                      } catch (error) {
-                        console.warn('⚠️ Error extracting property ID from link:', error);
-                        return `property-${Date.now()}-${index}`;
-                      }
-                    })();
-                    
-                    // Only add if we found some meaningful content
-                    if (textContent.length > 50 || price || rooms || area) {
-                      const property = {
-                        id: propertyId,
-                        title: textContent.substring(0, 100) + (textContent.length > 100 ? '...' : ''),
-                        price: price || 'Price not found',
-                        location: location || 'Location not specified',
-                        rooms: rooms || 'Rooms not specified',
-                        area: area || 'Area not specified',
-                        floor: floor || 'Floor not specified',
-                        description: textContent.substring(0, 200) + (textContent.length > 200 ? '...' : ''),
-                        imageUrl: imageUrl.startsWith('http') ? imageUrl : (imageUrl ? 'https://www.yad2.co.il' + imageUrl : ''),
-                        link: fullLink,
-                        contactInfo: 'Contact info not available',
-                        rawText: textContent
-                      };
-                      
-                      items.push(property);
-                      console.log(`✅ Extracted property ${index + 1} (ID: ${propertyId}): ${property.title.substring(0, 50)}...`);
-                    }
-                  } catch (error) {
-                    console.warn(`⚠️ Error extracting property ${index}:`, error);
-                  }
-                });
-                
-                if (items.length > 0) {
-                  break; // Stop trying other selectors if we found items
-                }
-              }
-            }
-            
-            if (items.length > 0) {
-              break; // Stop trying other container selectors if we found items
-            }
-          }
-        }
-        
-        if (items.length === 0) {
-          console.log('❌ No properties found. Analyzing page structure...');
-          
-          // Debug: Show all elements that might be properties
-          const allDivs = document.querySelectorAll('div');
-          console.log(`📊 Total div elements on page: ${allDivs.length}`);
-          
-          const divsWithText = Array.from(allDivs).filter(div => {
-            const text = div.textContent?.trim() || '';
-            return text.length > 20 && text.length < 500;
-          });
-          
-          console.log(`📊 Div elements with reasonable text content: ${divsWithText.length}`);
-          
-          // Show first few for debugging
-          divsWithText.slice(0, 3).forEach((div, index) => {
-            console.log(`🔍 Sample div ${index + 1}:`, div.textContent?.substring(0, 100) + '...');
-          });
-        }
-
-        return items;
-      });
+      const properties = await this.extractProperties(page);
+      const hasNextPage = await this.checkPaginationOnPage(page);
 
       return {
         success: true,
         data: properties,
         timestamp: new Date(),
-        totalItems: properties.length
+        totalItems: properties.length,
+        _hasNextPage: hasNextPage,
       };
-
     } catch (error) {
       console.error('❌ Single page scraping failed:', error);
-      
       return {
         success: false,
         data: [],
         error: error instanceof Error ? error.message : 'Unknown error occurred',
         timestamp: new Date(),
-        totalItems: 0
+        totalItems: 0,
       };
     } finally {
-      if (page) {
-        await page.close();
-      }
+      if (page) await page.close();
     }
   }
 
-  private async checkForNextPage(currentUrl: string): Promise<boolean> {
-    let page: Page | null = null;
-    
-    try {
-      if (!this.browser) {
-        return false;
-      }
+  // ── Stealth overrides ──────────────────────────────────────────
 
-      page = await this.browser.newPage();
-      await page.goto(currentUrl, { waitUntil: 'networkidle2', timeout: 30000 });
-      
-      // In headless mode, wait much longer for dynamic content to load
-      const isDocker = process.env.DOCKER_ENV === 'true' || process.env.NODE_ENV === 'production';
-      const waitTime = isDocker ? 8000 : 3000;
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-      
-      // Check for pagination indicators
-      const hasNextPage = await page.evaluate(() => {
-        // Method 1: Look for pagination text in Hebrew
-        const bodyText = document.body.textContent || '';
-        const pageMatch = bodyText.match(/עמוד\s*(\d+)\s*מתוך\s*(\d+)/);
-        
-        if (pageMatch) {
-          const currentPage = parseInt(pageMatch[1]!);
-          const totalPages = parseInt(pageMatch[2]!);
-          console.log(`📊 Hebrew pagination: Current ${currentPage} of ${totalPages}`);
-          return currentPage < totalPages;
-        }
-        
-        // Method 2: Look for page 2 link specifically
-        const page2Link = document.querySelector('a[href*="page=2"]');
-        if (page2Link) {
-          console.log(`📊 Found page 2 link: ${page2Link.getAttribute('href')}`);
-          return true;
-        }
-        
-        // Method 3: Check if we're on page 1 and there are results (assume more pages exist)
-        const currentPageMatch = window.location.href.match(/page=(\d+)/);
-        const currentPageNum = currentPageMatch ? parseInt(currentPageMatch[1]!) : 1;
-        const hasResults = document.querySelectorAll('[class*="item"], [class*="card"], article').length > 0;
-        
-        console.log(`📊 Current page: ${currentPageNum}, Has results: ${hasResults}`);
-        
-        // If we're on page 1 and have results, assume page 2 exists
-        if (currentPageNum === 1 && hasResults) {
-          return true;
-        }
-        
-        return false;
+  private async applyStealthOverrides(page: Page): Promise<void> {
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [
+          {
+            0: { type: 'application/x-google-chrome-pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: null },
+            description: 'Portable Document Format',
+            filename: 'internal-pdf-viewer',
+            length: 1,
+            name: 'Chrome PDF Plugin',
+          },
+          {
+            0: { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: null },
+            description: 'Portable Document Format',
+            filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+            length: 1,
+            name: 'Chrome PDF Viewer',
+          },
+        ],
       });
-      
-      return hasNextPage;
-    } catch (error) {
-      console.warn('⚠️ Error checking for next page:', error);
-      // Fallback: if we can't check and we're on page 1, assume page 2 exists
-      const currentPageMatch = currentUrl.match(/page=(\d+)/);
-      const currentPageNum = currentPageMatch ? parseInt(currentPageMatch[1]!) : 1;
-      return currentPageNum === 1;
-    } finally {
-      if (page) {
-        await page.close();
+
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['he', 'he-IL', 'en-US', 'en'],
+      });
+
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters: any) => originalQuery(parameters);
+
+      Object.defineProperty(window, 'chrome', {
+        writable: true,
+        enumerable: true,
+        configurable: false,
+        value: { runtime: {}, loadTimes: () => ({}), csi: () => ({}) },
+      });
+
+      Object.defineProperty(screen, 'availWidth', { value: 1920 });
+      Object.defineProperty(screen, 'availHeight', { value: 1080 });
+      Object.defineProperty(screen, 'width', { value: 1920 });
+      Object.defineProperty(screen, 'height', { value: 1080 });
+    });
+  }
+
+  private async setViewportAndHeaders(page: Page): Promise<void> {
+    await page.setViewport({
+      width: 1920,
+      height: 1080,
+      deviceScaleFactor: 1,
+      isMobile: false,
+      hasTouch: false,
+      isLandscape: true,
+    });
+
+    await page.setUserAgent(this.chosenUA.ua);
+
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'he,he-IL;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'Upgrade-Insecure-Requests': '1',
+      'Sec-CH-UA': this.chosenUA.secChUa,
+      'Sec-CH-UA-Mobile': '?0',
+      'Sec-CH-UA-Platform': `"${this.chosenUA.platform}"`,
+      'Sec-Fetch-Dest': 'document',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-User': '?1',
+    });
+  }
+
+  // ── Homepage warmup (referrer chain) ───────────────────────────
+
+  private async warmUpWithHomepage(page: Page): Promise<void> {
+    console.log('🏠 Warming up with homepage visit...');
+    await page.goto('https://www.yad2.co.il/', { waitUntil: 'networkidle2', timeout: 60_000 });
+
+    await this.simulateHumanBehavior(page);
+    await this.randomDelay(4000, 8000);
+
+    this.homepageWarmedUp = true;
+    console.log('🏠 Homepage warmup complete');
+  }
+
+  // ── Bot protection detection & handling ────────────────────────
+
+  private async isBotProtectionActive(page: Page): Promise<boolean> {
+    const title = await page.title();
+    return title.includes('ShieldSquare') || title.includes('Captcha') || title.includes('Access Denied');
+  }
+
+  private async handleCaptchaPatient(page: Page): Promise<boolean> {
+    // Phase 1: gentle mouse movement, let JS challenge timers run
+    for (let i = 0; i < 6; i++) {
+      await this.bezierMouseMove(page, Math.random() * 1200 + 100, Math.random() * 700 + 100);
+      await this.randomDelay(1500, 3500);
+    }
+
+    await page.mouse.click(960, 400);
+    await this.randomDelay(2000, 4000);
+
+    // Phase 2: wait patiently for auto-resolve (ShieldSquare JS challenge timeout)
+    console.log('⏳ Waiting for challenge to auto-resolve...');
+    await this.randomDelay(30_000, 45_000);
+
+    if (!(await this.isBotProtectionActive(page))) return true;
+
+    // Phase 3: try scrolling + clicking and wait again
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3));
+    await this.randomDelay(3000, 5000);
+    await page.mouse.click(Math.random() * 600 + 300, Math.random() * 400 + 200);
+    await this.randomDelay(20_000, 35_000);
+
+    return !(await this.isBotProtectionActive(page));
+  }
+
+  // ── Human behavior simulation ──────────────────────────────────
+
+  private async simulateHumanBehavior(page: Page): Promise<void> {
+    // Bezier mouse movements across the page
+    const targets = this.generateRandomPoints(5 + Math.floor(Math.random() * 4));
+    for (const pt of targets) {
+      await this.bezierMouseMove(page, pt.x, pt.y);
+      await this.randomDelay(300, 1200);
+    }
+
+    // Incremental smooth scrolling
+    const scrollSteps = 4 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < scrollSteps; i++) {
+      const scrollAmount = 150 + Math.floor(Math.random() * 250);
+      await page.evaluate((amount) => {
+        window.scrollBy({ top: amount, behavior: 'smooth' });
+      }, scrollAmount);
+      await this.randomDelay(1500, 3500);
+    }
+
+    // Hover over a visible link briefly
+    try {
+      const linkBoxes = await page.$$('a[href]');
+      if (linkBoxes.length > 3) {
+        const target = linkBoxes[Math.floor(Math.random() * Math.min(linkBoxes.length, 10))]!;
+        const box = await target.boundingBox();
+        if (box) {
+          await this.bezierMouseMove(page, box.x + box.width / 2, box.y + box.height / 2);
+          await this.randomDelay(500, 1500);
+        }
       }
+    } catch { /* element gone – harmless */ }
+
+    await this.randomDelay(2000, 5000);
+  }
+
+  private async bezierMouseMove(page: Page, endX: number, endY: number): Promise<void> {
+    const start = await page.evaluate(() => ({ x: window.scrollX + 400, y: window.scrollY + 300 }));
+    const steps = 15 + Math.floor(Math.random() * 15);
+
+    const cp1x = start.x + (endX - start.x) * 0.3 + (Math.random() - 0.5) * 200;
+    const cp1y = start.y + (endY - start.y) * 0.1 + (Math.random() - 0.5) * 200;
+    const cp2x = start.x + (endX - start.x) * 0.7 + (Math.random() - 0.5) * 200;
+    const cp2y = start.y + (endY - start.y) * 0.9 + (Math.random() - 0.5) * 200;
+
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const u = 1 - t;
+      const x = u * u * u * start.x + 3 * u * u * t * cp1x + 3 * u * t * t * cp2x + t * t * t * endX;
+      const y = u * u * u * start.y + 3 * u * u * t * cp1y + 3 * u * t * t * cp2y + t * t * t * endY;
+      await page.mouse.move(x, y);
+      await new Promise(r => setTimeout(r, 8 + Math.floor(Math.random() * 18)));
     }
   }
+
+  private generateRandomPoints(count: number): Array<{ x: number; y: number }> {
+    const points: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < count; i++) {
+      points.push({ x: 100 + Math.random() * 1600, y: 100 + Math.random() * 800 });
+    }
+    return points;
+  }
+
+  // ── Pagination (check on already-loaded page, no extra request) ─
+
+  private async checkPaginationOnPage(page: Page): Promise<boolean> {
+    return page.evaluate(() => {
+      const bodyText = document.body.textContent || '';
+      const hebrewMatch = bodyText.match(/עמוד\s*(\d+)\s*מתוך\s*(\d+)/);
+      if (hebrewMatch) {
+        const cur = parseInt(hebrewMatch[1]!);
+        const total = parseInt(hebrewMatch[2]!);
+        return cur < total;
+      }
+
+      const currentPageMatch = window.location.href.match(/page=(\d+)/);
+      const currentNum = currentPageMatch ? parseInt(currentPageMatch[1]!) : 1;
+      const nextPageLink = document.querySelector(`a[href*="page=${currentNum + 1}"]`);
+      if (nextPageLink) return true;
+
+      const paginationButtons = Array.from(document.querySelectorAll('[class*="pagination"] a, [class*="paging"] a, nav a[href*="page="]'));
+      for (const btn of paginationButtons) {
+        const href = btn.getAttribute('href') || '';
+        const pageMatch = href.match(/page=(\d+)/);
+        if (pageMatch && parseInt(pageMatch[1]!) > currentNum) return true;
+      }
+
+      return false;
+    });
+  }
+
+  // ── Property extraction (unchanged logic from previous fix) ────
+
+  private async extractProperties(page: Page): Promise<PropertyItem[]> {
+    return page.evaluate(() => {
+      const items: any[] = [];
+
+      const selectors = [
+        '[data-testid="feed-list"]',
+        '.feeditem',
+        '.item-card',
+        '.property-card',
+        'article',
+        '.listing',
+        '.feed-item',
+        '[class*="item"]',
+        '[class*="card"]',
+        '.item',
+        '.result-item',
+      ];
+
+      for (const selector of selectors) {
+        const container = document.querySelector(selector);
+        if (!container) continue;
+
+        const itemSelectors = [
+          'div[class*="item"]',
+          'div[class*="card"]',
+          'article',
+          'li',
+          'div[data-testid*="item"]',
+          'div[data-testid*="card"]',
+          'div[class*="property"]',
+          'div[class*="listing"]',
+        ];
+
+        for (const itemSelector of itemSelectors) {
+          const propertyElements = container.querySelectorAll(itemSelector);
+          if (propertyElements.length === 0) continue;
+
+          propertyElements.forEach((element, index) => {
+            try {
+              const textContent = element.textContent?.trim() || '';
+
+              const priceElement = element.querySelector('.feed-item-price_price__ygoeF');
+              const price = priceElement ? priceElement.textContent?.trim() || '' : '';
+
+              const roomMatch = textContent.match(/(\d+)\s*חדר/);
+              const rooms = roomMatch ? roomMatch[1] + ' rooms' : '';
+
+              const floorElements = element.querySelectorAll('.item-data-content_itemInfoLine__AeoPP');
+              const floorText = floorElements.length > 1 && floorElements[1] ? floorElements[1].textContent?.trim() || '' : '';
+              const floorMatch = floorText.match(/קומה\s*‎?(\d+)‏?/);
+              const floor = floorMatch ? `קומה ${floorMatch[1]}` : '';
+
+              const areaMatch = textContent.match(/(\d+)\s*מ["']ר|(\d+)\s*מטר|(\d+)\s*sqm/);
+              const area = areaMatch ? (areaMatch[1] || areaMatch[2] || areaMatch[3]) + ' מ"ר' : '';
+
+              const locationElement = element.querySelector('.item-data-content_heading__tphH4');
+              const location = locationElement ? locationElement.textContent?.trim() || '' : '';
+
+              const img = element.querySelector('img');
+              const imageUrl = img ? (img.getAttribute('src') || img.getAttribute('data-src') || '') : '';
+
+              const anchors = element.querySelectorAll('a[href*="/realestate/item/"]');
+              const listingLink = anchors.length > 0 ? anchors[0]?.getAttribute('href') ?? null : null;
+              const fallbackLink = element.querySelector('a');
+              const href = (listingLink || (fallbackLink ? fallbackLink.getAttribute('href') : null)) || '';
+              const fullLink = href.startsWith('http') ? href : (href ? 'https://www.yad2.co.il' + href : '');
+
+              const baseId = (() => {
+                try {
+                  const linkMatch = fullLink.match(/\/realestate\/item\/([^?\/]+)/);
+                  return linkMatch ? linkMatch[1] : `property-${Date.now()}-${index}`;
+                } catch {
+                  return `property-${Date.now()}-${index}`;
+                }
+              })();
+              const propertyId = items.some((p) => p.id === baseId) ? `${baseId}-${index}` : baseId;
+
+              if (textContent.length > 50 || price || rooms || area) {
+                const property = {
+                  id: propertyId,
+                  title: textContent.substring(0, 100) + (textContent.length > 100 ? '...' : ''),
+                  price: price || 'Price not found',
+                  location: location || 'Location not specified',
+                  rooms: rooms || 'Rooms not specified',
+                  area: area || 'Area not specified',
+                  floor: floor || 'Floor not specified',
+                  description: textContent.substring(0, 200) + (textContent.length > 200 ? '...' : ''),
+                  imageUrl: imageUrl.startsWith('http') ? imageUrl : (imageUrl ? 'https://www.yad2.co.il' + imageUrl : ''),
+                  link: fullLink,
+                  contactInfo: 'Contact info not available',
+                  rawText: textContent,
+                };
+
+                const alreadyHave = items.some((p) => p.id === propertyId);
+                if (!alreadyHave) {
+                  items.push(property);
+                }
+              }
+            } catch { /* skip element */ }
+          });
+
+          if (items.length > 0) break;
+        }
+
+        if (items.length > 0) break;
+      }
+
+      if (items.length === 0) {
+        console.log('❌ No properties found. Analyzing page structure...');
+        const allDivs = document.querySelectorAll('div');
+        console.log(`📊 Total div elements on page: ${allDivs.length}`);
+        const divsWithText = Array.from(allDivs).filter(div => {
+          const text = div.textContent?.trim() || '';
+          return text.length > 20 && text.length < 500;
+        });
+        console.log(`📊 Div elements with reasonable text content: ${divsWithText.length}`);
+        divsWithText.slice(0, 3).forEach((div, i) => {
+          console.log(`🔍 Sample div ${i + 1}:`, div.textContent?.substring(0, 100) + '...');
+        });
+      }
+
+      return items;
+    });
+  }
+
+  // ── Utilities ──────────────────────────────────────────────────
 
   private addPageParameter(url: string, pageNumber: number): string {
     try {
       const urlObj = new URL(url);
       urlObj.searchParams.set('page', pageNumber.toString());
       return urlObj.toString();
-    } catch (error) {
-      // Fallback for invalid URLs
+    } catch {
       const separator = url.includes('?') ? '&' : '?';
       return `${url}${separator}page=${pageNumber}`;
     }
@@ -547,28 +568,4 @@ export class EnhancedPuppeteerScraperService {
     const delay = Math.floor(Math.random() * (max - min + 1)) + min;
     await new Promise(resolve => setTimeout(resolve, delay));
   }
-
-  private async simulateExtensiveHumanBehavior(page: Page): Promise<void> {
-    // Multiple random mouse movements
-    for (let i = 0; i < 3; i++) {
-      await page.mouse.move(Math.random() * 1200, Math.random() * 800);
-      await this.randomDelay(500, 1500);
-    }
-    
-    // Random scrolling pattern
-    await page.evaluate(() => {
-      window.scrollTo(0, Math.random() * 300);
-    });
-    await this.randomDelay(2000, 4000);
-    
-    // More scrolling
-    await page.evaluate(() => {
-      window.scrollTo(0, Math.random() * 600);
-    });
-    await this.randomDelay(3000, 6000);
-    
-    // Random click (but not on anything important)
-    await page.mouse.click(Math.random() * 100 + 50, Math.random() * 100 + 50);
-    await this.randomDelay(1000, 3000);
-  }
-} 
+}
