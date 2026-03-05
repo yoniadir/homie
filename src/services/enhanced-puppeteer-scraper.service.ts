@@ -134,20 +134,27 @@ export class EnhancedPuppeteerScraperService {
   // ── Retry wrapper ──────────────────────────────────────────────
 
   private async scrapeSinglePageWithRetry(url: string): Promise<ScrapingResult & { _hasNextPage?: boolean }> {
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const result = await this.scrapeSinglePage(url);
+    let result = await this.scrapeSinglePage(url);
+
+    if (result.success) return result;
+
+    const isInitialCaptcha = (result.error ?? '').toLowerCase().includes('bot protection');
+    if (!isInitialCaptcha) return result;
+
+    for (let retry = 0; retry < MAX_RETRIES; retry++) {
+      const delay = RETRY_DELAYS_MS[retry] ?? 120_000;
+      console.log(`⏳ Captcha detected, retrying in ${delay / 1000}s (retry ${retry + 1}/${MAX_RETRIES})...`);
+      await new Promise(r => setTimeout(r, delay));
+
+      result = await this.scrapeSinglePage(url);
 
       if (result.success) return result;
 
       const isCaptcha = (result.error ?? '').toLowerCase().includes('bot protection');
-      if (!isCaptcha || attempt === MAX_RETRIES) return result;
-
-      const delay = RETRY_DELAYS_MS[attempt] ?? 120_000;
-      console.log(`⏳ Captcha detected, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})...`);
-      await new Promise(r => setTimeout(r, delay));
+      if (!isCaptcha) return result;
     }
 
-    return { success: false, data: [], error: 'Exhausted retries', timestamp: new Date(), totalItems: 0 };
+    return result;
   }
 
   // ── Core single-page scraper ───────────────────────────────────
@@ -245,7 +252,8 @@ export class EnhancedPuppeteerScraperService {
       });
 
       const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters: any) => originalQuery(parameters);
+      window.navigator.permissions.query = (parameters: any) =>
+        originalQuery.call(window.navigator.permissions, parameters);
 
       Object.defineProperty(window, 'chrome', {
         writable: true,
@@ -275,16 +283,6 @@ export class EnhancedPuppeteerScraperService {
 
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'he,he-IL;q=0.9,en-US;q=0.8,en;q=0.7',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-      'Upgrade-Insecure-Requests': '1',
-      'Sec-CH-UA': this.chosenUA.secChUa,
-      'Sec-CH-UA-Mobile': '?0',
-      'Sec-CH-UA-Platform': `"${this.chosenUA.platform}"`,
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
     });
   }
 
@@ -309,13 +307,17 @@ export class EnhancedPuppeteerScraperService {
   }
 
   private async handleCaptchaPatient(page: Page): Promise<boolean> {
+    const viewport = page.viewport();
+    const centerX = viewport ? viewport.width / 2 : 960;
+    const centerY = viewport ? viewport.height / 2 : 540;
+
     // Phase 1: gentle mouse movement, let JS challenge timers run
     for (let i = 0; i < 6; i++) {
       await this.bezierMouseMove(page, Math.random() * 1200 + 100, Math.random() * 700 + 100);
       await this.randomDelay(1500, 3500);
     }
 
-    await page.mouse.click(960, 400);
+    await page.mouse.click(centerX, centerY);
     await this.randomDelay(2000, 4000);
 
     // Phase 2: wait patiently for auto-resolve (ShieldSquare JS challenge timeout)
@@ -327,7 +329,9 @@ export class EnhancedPuppeteerScraperService {
     // Phase 3: try scrolling + clicking and wait again
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 3));
     await this.randomDelay(3000, 5000);
-    await page.mouse.click(Math.random() * 600 + 300, Math.random() * 400 + 200);
+    const clickX = viewport ? Math.random() * viewport.width * 0.5 + viewport.width * 0.25 : 400;
+    const clickY = viewport ? Math.random() * viewport.height * 0.5 + viewport.height * 0.25 : 300;
+    await page.mouse.click(clickX, clickY);
     await this.randomDelay(20_000, 35_000);
 
     return !(await this.isBotProtectionActive(page));
