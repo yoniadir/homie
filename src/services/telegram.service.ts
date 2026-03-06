@@ -74,10 +74,14 @@ export class TelegramService {
       await this.sendPropertyAlert(property);
       return true;
     } catch (error) {
-      const axiosError = error as AxiosError<{ description?: string }>;
+      const axiosError = error as AxiosError<{ description?: string; parameters?: { retry_after?: number } }>;
       const status = axiosError.response?.status;
-      const retryAfter = axiosError.response?.headers?.['retry-after'];
-      let waitSec = typeof retryAfter === 'string' ? parseInt(retryAfter, 10) : NaN;
+      const retryAfterHeader = axiosError.response?.headers?.['retry-after'];
+      const retryAfterBody = axiosError.response?.data?.parameters?.retry_after;
+      let waitSec = typeof retryAfterHeader === 'string' ? parseInt(retryAfterHeader, 10) : NaN;
+      if (Number.isNaN(waitSec) && typeof retryAfterBody === 'number' && retryAfterBody > 0) {
+        waitSec = retryAfterBody;
+      }
       const MAX_RETRY_AFTER_SEC = 120;
       if (!Number.isNaN(waitSec) && waitSec > MAX_RETRY_AFTER_SEC) {
         console.warn(`⏳ Telegram Retry-After ${waitSec}s capped to ${MAX_RETRY_AFTER_SEC}s`);
