@@ -7,26 +7,10 @@ import path from 'path';
 puppeteer.use(StealthPlugin());
 
 const USER_AGENTS = [
-  {
-    ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="133", "Google Chrome";v="133", "Not-A.Brand";v="99"',
-    platform: 'macOS',
-  },
-  {
-    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="133", "Google Chrome";v="133", "Not-A.Brand";v="99"',
-    platform: 'Windows',
-  },
-  {
-    ua: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="132", "Google Chrome";v="132", "Not-A.Brand";v="99"',
-    platform: 'macOS',
-  },
-  {
-    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    secChUa: '"Chromium";v="131", "Google Chrome";v="131", "Not-A.Brand";v="99"',
-    platform: 'Windows',
-  },
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
 ];
 
 const MAX_RETRIES = 3;
@@ -255,12 +239,14 @@ export class EnhancedPuppeteerScraperService {
       window.navigator.permissions.query = (parameters: any) =>
         originalQuery.call(window.navigator.permissions, parameters);
 
-      Object.defineProperty(window, 'chrome', {
-        writable: true,
-        enumerable: true,
-        configurable: false,
-        value: { runtime: {}, loadTimes: () => ({}), csi: () => ({}) },
-      });
+      if (typeof (window as Window & { chrome?: unknown }).chrome === 'undefined') {
+        Object.defineProperty(window, 'chrome', {
+          writable: true,
+          enumerable: true,
+          configurable: true,
+          value: { runtime: {}, loadTimes: () => ({}), csi: () => ({}) },
+        });
+      }
 
       Object.defineProperty(screen, 'availWidth', { value: 1920 });
       Object.defineProperty(screen, 'availHeight', { value: 1080 });
@@ -279,7 +265,7 @@ export class EnhancedPuppeteerScraperService {
       isLandscape: true,
     });
 
-    await page.setUserAgent(this.chosenUA.ua);
+    await page.setUserAgent(this.chosenUA);
 
     await page.setExtraHTTPHeaders({
       'Accept-Language': 'he,he-IL;q=0.9,en-US;q=0.8,en;q=0.7',
