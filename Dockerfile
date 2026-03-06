@@ -3,12 +3,13 @@ FROM node:20-bookworm
 
 WORKDIR /app
 
-# Install dependencies for Puppeteer
+# Install dependencies for Puppeteer + Xvfb (virtual display for headed mode)
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
     procps \
+    xvfb \
     libxss1 \
     libgconf-2-4 \
     libxtst6 \

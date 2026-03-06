@@ -33,6 +33,7 @@ services:
       - DB_NAME=${DB_NAME:-homie_db}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - PROXY_URL=${PROXY_URL:-}
     ports:
       - "3001:8080"
     depends_on:
@@ -58,6 +59,8 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - SCRAPE_CRON=${SCRAPE_CRON:-0,30 8-23 * * *}
+      - PROXY_URL=${PROXY_URL:-}
+      - PUPPETEER_HEADLESS=${PUPPETEER_HEADLESS:-true}
     depends_on:
       mysql:
         condition: service_healthy
@@ -65,7 +68,7 @@ services:
       - homie_network
     volumes:
       - ./exports:/app/exports
-    command: npm run scheduler:start
+    command: xvfb-run -a npm run scheduler:start
     profiles:
       - scheduler
 

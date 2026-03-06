@@ -14,7 +14,7 @@ const USER_AGENTS = [
 ];
 
 const MAX_RETRIES = 3;
-const RETRY_DELAYS_MS = [30_000, 60_000, 120_000];
+const RETRY_DELAYS_MS = [45_000, 90_000, 180_000];
 
 export class EnhancedPuppeteerScraperService {
   private browser: Browser | null = null;
@@ -25,6 +25,8 @@ export class EnhancedPuppeteerScraperService {
     if (this.browser) return;
 
     const isDocker = process.env.DOCKER_ENV === 'true' || process.env.NODE_ENV === 'production';
+    const headlessEnv = process.env.PUPPETEER_HEADLESS;
+    const headless = headlessEnv === 'false' ? false : headlessEnv === 'true' ? true : isDocker;
     const profileDir = path.resolve(process.cwd(), 'browser-profile');
 
     const args = [
@@ -42,7 +44,7 @@ export class EnhancedPuppeteerScraperService {
     }
 
     this.browser = await puppeteer.launch({
-      headless: isDocker,
+      headless,
       ...(isDocker && { executablePath: '/usr/bin/google-chrome-stable' }),
       userDataDir: profileDir,
       args,
