@@ -96,6 +96,21 @@ This project includes a comprehensive web scraping service for [Yad2](https://ww
 4. **Use residential proxies**: More likely to bypass detection
 5. **Consider headless browser detection**: Some sites detect headless browsers
 
+### Running in Docker (scheduler / API)
+
+When you see logs like **"Bot protection detected"**, **"Captcha detected, retrying in 45s"**, or **"Waiting for challenge to auto-resolve"**, the site is blocking the scraper. In Docker this is common because:
+
+- Chrome runs in **headless** mode by default (easier for ShieldSquare to detect).
+- The container uses a **datacenter IP**, which is often flagged.
+
+**What you can do:**
+
+1. **Use a residential proxy (recommended)**  
+   Set `PROXY_URL` in your `.env` (e.g. `http://user:pass@residential-proxy.example:8080`). Use a **residential** proxy provider (e.g. Bright Data, Oxylabs, Smartproxy); datacenter proxies are often blocked too. When running in Docker, this variable is already wired into both the **api** and **scheduler** services.
+
+2. **Headed Chrome in Docker (scheduler only)**  
+   The Docker image includes **Xvfb** (X Virtual Frame Buffer) and the **scheduler** runs under `xvfb-run`, so Chrome has a virtual display. To enable headed mode for the scheduler, set `PUPPETEER_HEADLESS=false` in your `.env`. The **api** service always runs headless (no virtual display) and does not support headed mode. Headed Chrome can help bypass bot detection.
+
 ### Usage Examples
 
 ```bash

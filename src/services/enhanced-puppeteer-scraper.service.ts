@@ -14,7 +14,7 @@ const USER_AGENTS = [
 ];
 
 const MAX_RETRIES = 3;
-const RETRY_DELAYS_MS = [30_000, 60_000, 120_000];
+const RETRY_DELAYS_MS = [45_000, 90_000, 180_000];
 
 export class EnhancedPuppeteerScraperService {
   private browser: Browser | null = null;
@@ -25,6 +25,8 @@ export class EnhancedPuppeteerScraperService {
     if (this.browser) return;
 
     const isDocker = process.env.DOCKER_ENV === 'true' || process.env.NODE_ENV === 'production';
+    const headlessEnv = process.env.PUPPETEER_HEADLESS;
+    const headless = headlessEnv === 'false' ? false : headlessEnv === 'true' ? true : isDocker;
     const profileDir = path.resolve(process.cwd(), 'browser-profile');
 
     const args = [
@@ -41,12 +43,27 @@ export class EnhancedPuppeteerScraperService {
       console.log(`🌐 Using proxy: ${cleaned.replace(/:[^:@]+@/, ':***@')}`);
     }
 
+    const headlessSource =
+      headlessEnv === 'false'
+        ? 'PUPPETEER_HEADLESS=false'
+        : headlessEnv === 'true'
+          ? 'PUPPETEER_HEADLESS=true'
+          : isDocker
+            ? 'default (Docker → headless)'
+            : 'default (local → headed)';
+
     this.browser = await puppeteer.launch({
-      headless: isDocker,
+      headless,
       ...(isDocker && { executablePath: '/usr/bin/google-chrome-stable' }),
       userDataDir: profileDir,
       args,
     });
+
+    console.log(
+      headless
+        ? `🌑 Chrome running in headless mode (${headlessSource})`
+        : `🖥️ Chrome running in headed mode (${headlessSource})`,
+    );
   }
 
   async closeBrowser(): Promise<void> {

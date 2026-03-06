@@ -63,8 +63,10 @@ export class ScraperDatabaseService {
         const unnotified = await this.database.getUnnotifiedProperties();
         if (unnotified.length > 0) {
           console.log(`📱 Sending Telegram notifications for ${unnotified.length} new properties...`);
-          await this.telegramService.sendBatch(unnotified);
-          await this.database.markAsNotified(unnotified.map((p) => p.id));
+          const sentIds = await this.telegramService.sendBatch(unnotified);
+          if (sentIds.length > 0) {
+            await this.database.markAsNotified(sentIds);
+          }
         }
       }
 
