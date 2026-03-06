@@ -50,6 +50,9 @@ logs
 .npm
 
 # Optional eslint cache
-.eslintcache 
+.eslintcache
+
+# Puppeteer persistent browser profile (cookies, cache – recreated at runtime)
+browser-profile/
 
 exports/

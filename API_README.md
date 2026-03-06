@@ -22,18 +22,18 @@ npm run api:dev
 npm run build && npm run api:start
 ```
 
-- **API Server**: http://localhost:3001
-- **Health Check**: http://localhost:3001/health
-- **API Documentation**: http://localhost:3001
+- **API Server**: http://localhost:8080 (or set `PORT` to use a different port)
+- **Health Check**: http://localhost:8080/health
+- **API Documentation**: http://localhost:8080
 
 ### Test the API
 
 ```bash
 # Check server status
-curl http://localhost:3001/
+curl http://localhost:8080/
 
 # Health check
-curl http://localhost:3001/health
+curl http://localhost:8080/health
 ```
 
 ## API Endpoints
@@ -41,7 +41,7 @@ curl http://localhost:3001/health
 ### 1. Start Scraping Job
 
 ```bash
-curl -X POST http://localhost:3001/scrape \
+curl -X POST http://localhost:8080/scrape \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://www.yad2.co.il/realestate/rent?maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520",
@@ -63,7 +63,7 @@ curl -X POST http://localhost:3001/scrape \
 ### 2. Get Job Status
 
 ```bash
-curl http://localhost:3001/scrape/job_1704123456789_abc123
+curl http://localhost:8080/scrape/job_1704123456789_abc123
 ```
 
 **Response:**
@@ -78,37 +78,37 @@ curl http://localhost:3001/scrape/job_1704123456789_abc123
 ### 3. Get All Jobs
 
 ```bash
-curl http://localhost:3001/scrape
+curl http://localhost:8080/scrape
 ```
 
 ### 4. Database Statistics
 
 ```bash
-curl http://localhost:3001/stats
+curl http://localhost:8080/stats
 ```
 
 ### 5. Get Properties
 
 ```bash
-curl http://localhost:3001/properties
+curl http://localhost:8080/properties
 ```
 
 ### 6. Export Data
 
 ```bash
-curl -X POST http://localhost:3001/export
+curl -X POST http://localhost:8080/export
 ```
 
 ### 7. Delete Job
 
 ```bash
-curl -X DELETE http://localhost:3001/jobs/job_1704123456789_abc123
+curl -X DELETE http://localhost:8080/jobs/job_1704123456789_abc123
 ```
 
 ### 8. Delete All Jobs
 
 ```bash
-curl -X DELETE http://localhost:3001/jobs
+curl -X DELETE http://localhost:8080/jobs
 ```
 
 ## Usage Examples
@@ -120,7 +120,7 @@ const axios = require('axios');
 
 async function startScraping() {
   try {
-    const response = await axios.post('http://localhost:3001/scrape', {
+    const response = await axios.post('http://localhost:8080/scrape', {
       url: 'https://www.yad2.co.il/realestate/rent?maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520',
       enhanced: true,
       saveToDatabase: true,
@@ -131,7 +131,7 @@ async function startScraping() {
     console.log('Job started:', jobId);
     
     // Check status
-    const statusResponse = await axios.get(`http://localhost:3001/scrape/${jobId}`);
+    const statusResponse = await axios.get(`http://localhost:8080/scrape/${jobId}`);
     console.log('Status:', statusResponse.data.status);
     
   } catch (error) {
@@ -150,7 +150,7 @@ import json
 import time
 
 def start_scraping():
-    url = "http://localhost:3001/scrape"
+    url = "http://localhost:8080/scrape"
     data = {
         "url": "https://www.yad2.co.il/realestate/rent?maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520",
         "enhanced": True,
@@ -163,7 +163,7 @@ def start_scraping():
     print(f"Job started: {job_id}")
     
     # Check status
-    status_response = requests.get(f'http://localhost:3001/scrape/{job_id}')
+    status_response = requests.get(f'http://localhost:8080/scrape/{job_id}')
     print(f"Status: {status_response.json()['status']}")
 
 start_scraping()
@@ -175,7 +175,7 @@ start_scraping()
 #!/bin/bash
 
 # Start scraping job
-JOB_RESPONSE=$(curl -s -X POST http://localhost:3001/scrape \
+JOB_RESPONSE=$(curl -s -X POST http://localhost:8080/scrape \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://www.yad2.co.il/realestate/rent?maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520",
@@ -188,7 +188,7 @@ JOB_ID=$(echo $JOB_RESPONSE | jq -r '.jobId')
 echo "Job started: $JOB_ID"
 
 # Check status
-STATUS_RESPONSE=$(curl -s http://localhost:3001/scrape/$JOB_ID)
+STATUS_RESPONSE=$(curl -s http://localhost:8080/scrape/$JOB_ID)
 echo "Status: $(echo $STATUS_RESPONSE | jq -r '.status')"
 ```
 
@@ -246,10 +246,10 @@ services:
 docker-compose up -d --build
 
 # Test the API
-curl http://localhost:3001/health
+curl http://localhost:8080/health
 
 # View logs
-curl http://localhost:3001/stats
+curl http://localhost:8080/stats
 ```
 
 ## Configuration
