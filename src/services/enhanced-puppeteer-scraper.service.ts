@@ -43,12 +43,27 @@ export class EnhancedPuppeteerScraperService {
       console.log(`🌐 Using proxy: ${cleaned.replace(/:[^:@]+@/, ':***@')}`);
     }
 
+    const headlessSource =
+      headlessEnv === 'false'
+        ? 'PUPPETEER_HEADLESS=false'
+        : headlessEnv === 'true'
+          ? 'PUPPETEER_HEADLESS=true'
+          : isDocker
+            ? 'default (Docker → headless)'
+            : 'default (local → headed)';
+
     this.browser = await puppeteer.launch({
       headless,
       ...(isDocker && { executablePath: '/usr/bin/google-chrome-stable' }),
       userDataDir: profileDir,
       args,
     });
+
+    console.log(
+      headless
+        ? `🌑 Chrome running in headless mode (${headlessSource})`
+        : `🖥️ Chrome running in headed mode (${headlessSource})`,
+    );
   }
 
   async closeBrowser(): Promise<void> {

@@ -34,6 +34,7 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - PROXY_URL=${PROXY_URL:-}
+      - PUPPETEER_HEADLESS=true
     ports:
       - "3001:8080"
     depends_on:
@@ -68,7 +69,7 @@ services:
       - homie_network
     volumes:
       - ./exports:/app/exports
-    command: xvfb-run -a npm run scheduler:start
+    command: ["/bin/sh", "-c", "/usr/bin/xvfb-run -a npm run scheduler:start"]
     profiles:
       - scheduler
 

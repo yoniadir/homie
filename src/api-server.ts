@@ -383,14 +383,16 @@ app.post('/notifications/send', async (req, res) => {
       });
     }
 
-    await telegramService.sendBatch(unnotified);
-    await dbService.markAsNotified(unnotified.map((p) => p.id));
+    const sentIds = await telegramService.sendBatch(unnotified);
+    if (sentIds.length > 0) {
+      await dbService.markAsNotified(sentIds);
+    }
     await dbService.disconnect();
 
     return res.json({
       success: true,
-      message: `Sent Telegram notifications for ${unnotified.length} properties`,
-      sentCount: unnotified.length,
+      message: `Sent Telegram notifications for ${sentIds.length} of ${unnotified.length} properties`,
+      sentCount: sentIds.length,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
