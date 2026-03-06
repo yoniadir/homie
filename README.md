@@ -106,13 +106,10 @@ When you see logs like **"Bot protection detected"**, **"Captcha detected, retry
 **What you can do:**
 
 1. **Use a residential proxy (recommended)**  
-   Set `PROXY_URL` in your `.env` (e.g. `http://user:pass@residential-proxy.example:8080`). Use a **residential** proxy provider (e.g. Bright Data, Oxylabs, Smartproxy); datacenter proxies are often blocked too.
+   Set `PROXY_URL` in your `.env` (e.g. `http://user:pass@residential-proxy.example:8080`). Use a **residential** proxy provider (e.g. Bright Data, Oxylabs, Smartproxy); datacenter proxies are often blocked too. When running in Docker, this variable is already wired into both the **api** and **scheduler** services.
 
-2. **Pass the proxy into Docker**  
-   Set `PROXY_URL` in your `.env` — it is already wired into both the api and scheduler services.
-
-3. **Headed Chrome in Docker (already set up for the scheduler)**  
-   The Docker image includes **Xvfb** (X Virtual Frame Buffer) and the scheduler runs under `xvfb-run`, so Chrome has a virtual display to attach to. To enable headed mode, set `PUPPETEER_HEADLESS=false` in your `.env` -- no extra container setup needed. Headed Chrome behaves more like a real browser and can help bypass bot detection.
+2. **Headed Chrome in Docker (scheduler only)**  
+   The Docker image includes **Xvfb** (X Virtual Frame Buffer) and the **scheduler** runs under `xvfb-run`, so Chrome has a virtual display. To enable headed mode for the scheduler, set `PUPPETEER_HEADLESS=false` in your `.env`. The **api** service always runs headless (no virtual display) and does not support headed mode. Headed Chrome can help bypass bot detection.
 
 ### Usage Examples
 

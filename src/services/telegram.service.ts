@@ -51,10 +51,13 @@ export class TelegramService {
       return sentIds;
     }
 
-    for (const property of properties) {
+    for (let i = 0; i < properties.length; i++) {
+      const property = properties[i];
       const ok = await this.sendOneWithRetry(property);
       if (ok) sentIds.push(property.id);
-      await new Promise((r) => setTimeout(r, DELAY_BETWEEN_MESSAGES_MS));
+      if (i < properties.length - 1) {
+        await new Promise((r) => setTimeout(r, DELAY_BETWEEN_MESSAGES_MS));
+      }
     }
 
     if (properties.length > 0) {
@@ -74,7 +77,12 @@ export class TelegramService {
       const axiosError = error as AxiosError<{ description?: string }>;
       const status = axiosError.response?.status;
       const retryAfter = axiosError.response?.headers?.['retry-after'];
-      const waitSec = typeof retryAfter === 'string' ? parseInt(retryAfter, 10) : NaN;
+      let waitSec = typeof retryAfter === 'string' ? parseInt(retryAfter, 10) : NaN;
+      const MAX_RETRY_AFTER_SEC = 120;
+      if (!Number.isNaN(waitSec) && waitSec > MAX_RETRY_AFTER_SEC) {
+        console.warn(`⏳ Telegram Retry-After ${waitSec}s capped to ${MAX_RETRY_AFTER_SEC}s`);
+        waitSec = MAX_RETRY_AFTER_SEC;
+      }
 
       if (status === 429 && !isRetry && !Number.isNaN(waitSec) && waitSec > 0) {
         console.warn(`⏳ Telegram rate limited; waiting ${waitSec}s before retry...`);
