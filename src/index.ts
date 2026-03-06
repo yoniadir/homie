@@ -13,11 +13,10 @@ const enhancedScraperService = new EnhancedPuppeteerScraperService();
 const csvExportService = new CsvExportService();
 const scraperDatabaseService = new ScraperDatabaseService();
 
-// The target URLs for scraping Yad2
+// The target URLs for scraping Yad2 (neighborhoods 1461, 1520; minPrice=8000, maxPrice=13000)
 const targetUrls = [
-  'https://www.yad2.co.il/realestate/rent?minPrice=8000&maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520',
-  'https://www.yad2.co.il/realestate/rent?minPrice=8000&maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1521',
-  'https://www.yad2.co.il/realestate/rent?minPrice=8000&maxPrice=10000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=495'
+  'https://www.yad2.co.il/realestate/rent?minPrice=8000&maxPrice=13000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1461',
+  'https://www.yad2.co.il/realestate/rent?minPrice=8000&maxPrice=13000&minRooms=3&maxRooms=4&zoom=14&topArea=2&area=1&city=5000&neighborhood=1520'
 ];
 
 /**

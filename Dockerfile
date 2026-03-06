@@ -1,4 +1,5 @@
-FROM node:18-bullseye
+# Build from source: COPY . . and npm run build ensure the image runs latest code.
+FROM node:20-bookworm
 
 WORKDIR /app
 
