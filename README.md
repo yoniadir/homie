@@ -109,7 +109,31 @@ When you see logs like **"Bot protection detected"**, **"Captcha detected, retry
    Set `PROXY_URL` in your `.env` (e.g. `http://user:pass@residential-proxy.example:8080`). Use a **residential** proxy provider (e.g. Bright Data, Oxylabs, Smartproxy); datacenter proxies are often blocked too. When running in Docker, this variable is already wired into both the **api** and **scheduler** services.
 
 2. **Headed Chrome in Docker (scheduler only)**  
-   The Docker image includes **Xvfb** (X Virtual Frame Buffer) and the **scheduler** runs under `xvfb-run`, so Chrome has a virtual display. To enable headed mode for the scheduler, set `PUPPETEER_HEADLESS=false` in your `.env`. The **api** service always runs headless (no virtual display) and does not support headed mode. Headed Chrome can help bypass bot detection.
+   The Docker image includes **Xvfb** and the **scheduler** runs under `xvfb-run`, so Chrome has a virtual display. The scheduler **defaults to headed mode** in Docker (same as running locally) to avoid bot detection. To force headless in the scheduler, set `PUPPETEER_HEADLESS=true` in your `.env`. The **api** service always runs headless and does not support headed mode.
+
+3. **Persistent Docker browser profile**  
+   The **api** and **scheduler** services each use a separate profile directory (`./browser-profile-docker-api` and `./browser-profile-docker-scheduler`) so they do not contend for Chrome’s profile lock. The scheduler (and `npm run docker:scrape`) use the scheduler profile so Docker runs can keep cookies and challenge state across runs. If the container cannot write to a profile directory, ensure it is owned by your user and only accessible to you, for example:
+   ```bash
+   chown -R "$(id -u):$(id -g)" browser-profile-docker-api browser-profile-docker-scheduler
+   chmod -R 700 browser-profile-docker-api browser-profile-docker-scheduler
+   ```
+
+**Verify Docker setup (optional)**  
+Before first run, create the profile directories so bind mounts work and optionally validate the stack:
+
+```bash
+npm run docker:verify
+```
+
+Then bring up the stack and run a one-off scrape to confirm everything works:
+
+```bash
+docker-compose --profile scheduler up -d
+docker-compose --profile scheduler logs -f api scheduler   # Ctrl+C to stop following
+
+# Or run a one-off scrape (uses scheduler profile)
+npm run docker:scrape
+```
 
 ### Usage Examples
 

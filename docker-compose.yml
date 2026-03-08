@@ -44,6 +44,7 @@ services:
       - homie_network
     volumes:
       - ./exports:/app/exports
+      - ./browser-profile-docker-api:/app/browser-profile-docker
 
   scheduler:
     build: .
@@ -61,7 +62,7 @@ services:
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - SCRAPE_CRON=${SCRAPE_CRON:-0,30 8-23 * * *}
       - PROXY_URL=${PROXY_URL:-}
-      - PUPPETEER_HEADLESS=${PUPPETEER_HEADLESS:-true}
+      - PUPPETEER_HEADLESS=${PUPPETEER_HEADLESS:-false}
     depends_on:
       mysql:
         condition: service_healthy
@@ -69,6 +70,7 @@ services:
       - homie_network
     volumes:
       - ./exports:/app/exports
+      - ./browser-profile-docker-scheduler:/app/browser-profile-docker
     command: ["/bin/sh", "-c", "/usr/bin/xvfb-run -a npm run scheduler:start"]
     profiles:
       - scheduler

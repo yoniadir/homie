@@ -2,7 +2,26 @@ import { EnhancedPuppeteerScraperService } from './enhanced-puppeteer-scraper.se
 import { DatabaseService } from './database.service';
 import { CsvExportService } from './csv-export.service';
 import { TelegramService } from './telegram.service';
-import { ScrapingResult } from '../interfaces/property.interface';
+import { PropertyItem, ScrapingResult } from '../interfaces/property.interface';
+
+type SaveOptions = {
+  exportCsv?: boolean;
+  cleanOldData?: boolean;
+  cleanOldDays?: number;
+};
+
+type SaveResult = {
+  inserted: number;
+  updated: number;
+  skipped: number;
+  totalInDb: number;
+  statistics: {
+    totalProperties: number;
+    todayProperties: number;
+    avgPrice: number;
+    locationCounts: Array<{ location: string; count: number }>;
+  };
+};
 
 export class ScraperDatabaseService {
   private scraper: EnhancedPuppeteerScraperService;
@@ -20,27 +39,8 @@ export class ScraperDatabaseService {
   /**
    * Scrape properties and save to database
    */
-  async scrapeAndSaveToDatabase(url: string, options: {
-    exportCsv?: boolean;
-    cleanOldData?: boolean;
-    cleanOldDays?: number;
-  } = {}): Promise<ScrapingResult & { dbStats?: any }> {
+  async scrapeAndSaveToDatabase(url: string, options: SaveOptions = {}): Promise<ScrapingResult & { dbStats?: SaveResult }> {
     try {
-      // Connect to database
-      await this.database.connect();
-      
-      // Ensure table exists
-      await this.database.createTable();
-
-      // Clean old data if requested
-      if (options.cleanOldData) {
-        await this.database.deleteOldProperties(options.cleanOldDays || 30);
-      }
-
-      // Get initial count
-      const initialCount = await this.database.getPropertiesCount();
-      console.log(`📊 Initial database count: ${initialCount} properties`);
-
       // Scrape properties
       console.log('🔍 Starting property scraping...');
       const scrapingResult = await this.scraper.scrapeProperties(url);
@@ -49,16 +49,43 @@ export class ScraperDatabaseService {
         return scrapingResult;
       }
 
-    // Filter properties for CSV export (same logic as before)
-    const filteredProperties = scrapingResult.data.filter(property => 
-        property.link && property.link.trim() !== '' && 
-        property.price !== 'Price not found'
-    );
+      const dbStats = await this.savePropertiesToDatabase(scrapingResult.data, options);
 
-      // Save to database (only properties with links)
+      return {
+        ...scrapingResult,
+        dbStats,
+      };
+
+    } catch (error) {
+      console.error('❌ Scraper database service failed:', error);
+      throw error;
+    } finally {
+      await this.scraper.closeBrowser();
+    }
+  }
+
+  /**
+   * Save already-scraped properties to the database without triggering another scrape.
+   */
+  async savePropertiesToDatabase(properties: PropertyItem[], options: SaveOptions = {}): Promise<SaveResult> {
+    try {
+      await this.database.connect();
+      await this.database.createTable();
+
+      if (options.cleanOldData) {
+        await this.database.deleteOldProperties(options.cleanOldDays || 30);
+      }
+
+      const initialCount = await this.database.getPropertiesCount();
+      console.log(`📊 Initial database count: ${initialCount} properties`);
+
+      const filteredProperties = properties.filter(property =>
+        property.link && property.link.trim() !== '' &&
+        property.price !== 'Price not found',
+      );
+
       const { inserted, updated, skipped } = await this.database.upsertProperties(filteredProperties);
 
-      // Send Telegram notifications for unnotified properties
       if (this.telegramService.isConfigured()) {
         const unnotified = await this.database.getUnnotifiedProperties();
         if (unnotified.length > 0) {
@@ -70,14 +97,12 @@ export class ScraperDatabaseService {
         }
       }
 
-      // Export to CSV if requested
       if (options.exportCsv) {
         await this.csvExport.exportToCSVEnhanced(filteredProperties);
       }
 
-      // Get final statistics
       const finalStats = await this.database.getStatistics();
-      
+
       console.log('📊 Final Database Statistics:');
       console.log(`   Total Properties: ${finalStats.totalProperties}`);
       console.log(`   Today's Properties: ${finalStats.todayProperties}`);
@@ -88,23 +113,17 @@ export class ScraperDatabaseService {
       });
 
       return {
-        ...scrapingResult,
-        dbStats: {
-          inserted,
-          updated,
-          skipped,
-          totalInDb: finalStats.totalProperties,
-          statistics: finalStats
-        }
+        inserted,
+        updated,
+        skipped,
+        totalInDb: finalStats.totalProperties,
+        statistics: finalStats,
       };
-
     } catch (error) {
-      console.error('❌ Scraper database service failed:', error);
+      console.error('❌ Failed to save already-scraped properties to database:', error);
       throw error;
     } finally {
-      // Always disconnect
       await this.database.disconnect();
-      await this.scraper.closeBrowser();
     }
   }
 

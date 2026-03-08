@@ -181,29 +181,14 @@ async function scrapeWithEnhancedPuppeteer(): Promise<void> {
       if (saveToDatabase) {
         try {
           console.log('📀 Saving to database...');
-          let totalInserted = 0;
-          let totalUpdated = 0;
-          let totalSkipped = 0;
-          
-          for (let i = 0; i < targetUrls.length; i++) {
-            const targetUrl = targetUrls[i];
-            console.log(`📀 [${i + 1}/${targetUrls.length}] Saving data from: ${targetUrl!.split('neighborhood=')[1] ? 'neighborhood ' + targetUrl!.split('neighborhood=')[1] : 'location ' + (i + 1)}...`);
-            
-            const dbResult = await scraperDatabaseService.scrapeAndSaveToDatabase(targetUrl!, {
-              exportCsv: false, // We already exported to CSV above
-              cleanOldData: i === 0, // Only clean on first URL
-              cleanOldDays: 30
-            });
-            
-            if (dbResult.success && dbResult.dbStats) {
-              totalInserted += dbResult.dbStats.inserted || 0;
-              totalUpdated += dbResult.dbStats.updated || 0;
-              totalSkipped += dbResult.dbStats.skipped || 0;
-            }
-          }
-          
+          const dbStats = await scraperDatabaseService.savePropertiesToDatabase(filteredProperties, {
+            exportCsv: false, // We already exported to CSV above
+            cleanOldData: true,
+            cleanOldDays: 30
+          });
+
           console.log('✅ Database save completed successfully!');
-          console.log(`📀 Combined Database Stats: ${totalInserted} new, ${totalUpdated} updated, ${totalSkipped} skipped`);
+          console.log(`📀 Combined Database Stats: ${dbStats.inserted} new, ${dbStats.updated} updated, ${dbStats.skipped} skipped`);
         } catch (error) {
           console.error('❌ Database operation failed:', error);
         }
@@ -270,21 +255,17 @@ async function scrapeWithDatabaseIntegration(): Promise<void> {
     console.log(`📊 Total properties scraped: ${totalItems}`);
     console.log(`📀 Combined Database Stats: ${totalInserted} new, ${totalUpdated} updated, ${totalSkipped} skipped`);
     
-    // Get final statistics from the last successful scrape
+    // Get final statistics without triggering another scrape
     if (totalSuccessful > 0) {
       try {
-        const finalResult = await scraperDatabaseService.scrapeAndSaveToDatabase(targetUrls[0]!, {
-          exportCsv: false,
-          cleanOldData: false,
-          cleanOldDays: 30
-        });
-        
-        if (finalResult.dbStats?.statistics) {
+        const finalStats = await scraperDatabaseService.getDatabaseStatistics();
+
+        if (finalStats) {
           console.log('\n📊 Final Database Statistics:');
-          console.log(`   Today's Properties: ${finalResult.dbStats.statistics.todayProperties}`);
-          console.log(`   Average Price: ₪${finalResult.dbStats.statistics.avgPrice}`);
+          console.log(`   Today's Properties: ${finalStats.todayProperties}`);
+          console.log(`   Average Price: ₪${finalStats.avgPrice}`);
           console.log(`   Top Locations:`);
-          finalResult.dbStats.statistics.locationCounts.slice(0, 5).forEach((loc: any, index: number) => {
+          finalStats.locationCounts.slice(0, 5).forEach((loc: any, index: number) => {
             console.log(`     ${index + 1}. ${loc.location}: ${loc.count} properties`);
           });
         }

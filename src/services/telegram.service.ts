@@ -53,6 +53,7 @@ export class TelegramService {
 
     for (let i = 0; i < properties.length; i++) {
       const property = properties[i];
+      if (!property) continue;
       const ok = await this.sendOneWithRetry(property);
       if (ok) sentIds.push(property.id);
       if (i < properties.length - 1) {

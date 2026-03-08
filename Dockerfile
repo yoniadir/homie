@@ -70,6 +70,9 @@ RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
     && chown -R pptruser:pptruser /home/pptruser \
     && chown -R pptruser:pptruser /app
 
+# So Xvfb can create display socket when running as pptruser (for docker:scrape / scheduler)
+RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
+
 # Switch to non-root user
 USER pptruser
 
