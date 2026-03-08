@@ -54,5 +54,7 @@ logs
 
 # Puppeteer persistent browser profile (cookies, cache – recreated at runtime)
 browser-profile/
+browser-profile-docker/
+browser-profile-docker-test/
 
 exports/

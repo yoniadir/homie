@@ -109,7 +109,10 @@ When you see logs like **"Bot protection detected"**, **"Captcha detected, retry
    Set `PROXY_URL` in your `.env` (e.g. `http://user:pass@residential-proxy.example:8080`). Use a **residential** proxy provider (e.g. Bright Data, Oxylabs, Smartproxy); datacenter proxies are often blocked too. When running in Docker, this variable is already wired into both the **api** and **scheduler** services.
 
 2. **Headed Chrome in Docker (scheduler only)**  
-   The Docker image includes **Xvfb** (X Virtual Frame Buffer) and the **scheduler** runs under `xvfb-run`, so Chrome has a virtual display. To enable headed mode for the scheduler, set `PUPPETEER_HEADLESS=false` in your `.env`. The **api** service always runs headless (no virtual display) and does not support headed mode. Headed Chrome can help bypass bot detection.
+   The Docker image includes **Xvfb** and the **scheduler** runs under `xvfb-run`, so Chrome has a virtual display. The scheduler **defaults to headed mode** in Docker (same as running locally) to avoid bot detection. To force headless in the scheduler, set `PUPPETEER_HEADLESS=true` in your `.env`. The **api** service always runs headless and does not support headed mode.
+
+3. **Persistent Docker browser profile**  
+   The scheduler (and `npm run docker:scrape`) mount `./browser-profile-docker` into the container so Docker runs can keep their own cookies and challenge state across runs without sharing a macOS Chrome profile. If the container cannot write to `browser-profile-docker`, run `chmod -R 777 browser-profile-docker` once.
 
 ### Usage Examples
 

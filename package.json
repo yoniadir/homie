@@ -33,7 +33,8 @@
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
     "docker:logs:api": "docker-compose logs -f api",
-    "docker:logs:mysql": "docker-compose logs -f mysql"
+    "docker:logs:mysql": "docker-compose logs -f mysql",
+    "docker:scrape": "docker-compose run --rm scheduler /bin/sh -c \"/usr/bin/Xvfb :99 -screen 0 1920x1080x24 & sleep 2 && export DISPLAY=:99 && node dist/index.js --enhanced --db\""
   },
   "keywords": [],
   "author": "",

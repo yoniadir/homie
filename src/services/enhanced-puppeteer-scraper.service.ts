@@ -2,39 +2,58 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { Browser, Page } from 'puppeteer';
 import { PropertyItem, ScrapingResult } from '../interfaces/property.interface';
+import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 puppeteer.use(StealthPlugin());
-
-const USER_AGENTS = [
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-];
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS_MS = [45_000, 90_000, 180_000];
 
 export class EnhancedPuppeteerScraperService {
   private browser: Browser | null = null;
-  private chosenUA = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]!;
+  private page: Page | null = null;
   private homepageWarmedUp = false;
+  private activeProfileDir: string | null = null;
+  private usingTempProfile = false;
+  private launchDiagnosticsLogged = false;
+  private resolvedUserAgent: string | null = null;
+  private readonly acceptLanguage = 'he-IL,he;q=0.9,en-US;q=0.8,en;q=0.7';
+  private readonly timezone = 'Asia/Jerusalem';
+  private readonly geolocation = { latitude: 32.0853, longitude: 34.7818, accuracy: 25 };
 
-  async initBrowser(): Promise<void> {
+  async initBrowser(useTempProfile = false): Promise<void> {
     if (this.browser) return;
 
     const isDocker = process.env.DOCKER_ENV === 'true' || process.env.NODE_ENV === 'production';
     const headlessEnv = process.env.PUPPETEER_HEADLESS;
     const headless = headlessEnv === 'false' ? false : headlessEnv === 'true' ? true : isDocker;
-    const profileDir = path.resolve(process.cwd(), 'browser-profile');
+    // Persistent profile: reuse cookies/session (fewer bot prompts). Temp profile: avoid "Chrome opens then closes" when the persistent profile is locked (e.g. another Chrome using it or leftover lock).
+    const persistentProfileDir = path.resolve(
+      process.cwd(),
+      isDocker ? 'browser-profile-docker' : 'browser-profile',
+    );
+    const profileDir = useTempProfile
+      ? path.join(os.tmpdir(), `puppeteer-profile-${process.pid}-${Date.now()}`)
+      : persistentProfileDir;
+    await this.cleanupStaleProfileLocks(profileDir);
 
     const args = [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
+      '--window-size=1920,1080',
+      '--lang=he-IL',
+      '--enable-webgl',
+      '--ignore-gpu-blocklist',
+      '--use-angle=swiftshader-webgl',
+      '--use-gl=angle',
     ];
+    if (headless) {
+      args.push('--headless=new');
+    }
 
     const proxyUrl = process.env.PROXY_URL;
     if (proxyUrl) {
@@ -52,25 +71,85 @@ export class EnhancedPuppeteerScraperService {
             ? 'default (Docker → headless)'
             : 'default (local → headed)';
 
-    this.browser = await puppeteer.launch({
+    if (isDocker && !headless) {
+      const display = process.env.DISPLAY || '';
+      if (!display) {
+        console.warn('⚠️ DISPLAY is not set — Chrome may fall back to headless. Ensure the process is run under xvfb-run (e.g. xvfb-run -a node ...).');
+      } else {
+        console.log(`🖥️ Virtual display: DISPLAY=${display}`);
+      }
+    }
+
+    const launchOptions: Parameters<typeof puppeteer.launch>[0] = {
       headless,
       ...(isDocker && { executablePath: '/usr/bin/google-chrome-stable' }),
       userDataDir: profileDir,
       args,
-    });
+    };
+    if (isDocker && !headless && process.env.DISPLAY) {
+      launchOptions.env = { ...process.env, DISPLAY: process.env.DISPLAY };
+    }
+
+    const isTargetClosedError = (e: unknown): boolean => {
+      const err = e as Error & { cause?: unknown };
+      const msg = err?.message ? err.message + (err.cause != null ? String(err.cause) : '') : String(e);
+      return /Target closed|Protocol error.*Target\.(setAutoAttach|setDiscoverTargets)/i.test(msg);
+    };
+
+    try {
+      this.browser = await puppeteer.launch(launchOptions);
+      await this.browser.defaultBrowserContext().overridePermissions('https://www.yad2.co.il', ['geolocation']);
+      // Verify the browser stays alive (Chrome can exit right after launch with a locked profile).
+      this.page = await this.browser.newPage();
+      await this.preparePage(this.page);
+      this.activeProfileDir = profileDir;
+      this.usingTempProfile = useTempProfile;
+      this.resolvedUserAgent = await this.browser.userAgent();
+    } catch (e) {
+      if (this.page) {
+        try {
+          await this.page.close();
+        } catch {
+          /* ignore */
+        }
+        this.page = null;
+      }
+      if (this.browser) {
+        try {
+          await this.browser.close();
+        } catch {
+          /* ignore */
+        }
+        this.browser = null;
+      }
+      if (!useTempProfile && isTargetClosedError(e)) {
+        console.warn('⚠️ Browser exited immediately (profile may be in use). Retrying with a temporary profile for this run.');
+        return this.initBrowser(true);
+      }
+      throw e;
+    }
 
     console.log(
       headless
         ? `🌑 Chrome running in headless mode (${headlessSource})`
         : `🖥️ Chrome running in headed mode (${headlessSource})`,
     );
+    console.log(
+      `📁 Browser profile: ${this.activeProfileDir}${this.usingTempProfile ? ' (temporary fallback)' : ''}`,
+    );
+    console.log(`🌐 Browser runtime: ${await this.browser.version()}`);
   }
 
   async closeBrowser(): Promise<void> {
     if (this.browser) {
       await this.browser.close();
       this.browser = null;
+      this.page = null;
       this.homepageWarmedUp = false;
+      this.launchDiagnosticsLogged = false;
+      this.activeProfileDir = null;
+      this.usingTempProfile = false;
+      this.resolvedUserAgent = null;
     }
   }
 
@@ -165,10 +244,7 @@ export class EnhancedPuppeteerScraperService {
 
     try {
       if (!this.browser) throw new Error('Browser not initialized');
-      page = await this.browser.newPage();
-
-      await this.applyStealthOverrides(page);
-      await this.setViewportAndHeaders(page);
+      page = await this.getOrCreatePage();
 
       if (!this.homepageWarmedUp) {
         await this.warmUpWithHomepage(page);
@@ -218,8 +294,6 @@ export class EnhancedPuppeteerScraperService {
         timestamp: new Date(),
         totalItems: 0,
       };
-    } finally {
-      if (page) await page.close();
     }
   }
 
@@ -252,6 +326,18 @@ export class EnhancedPuppeteerScraperService {
         get: () => ['he', 'he-IL', 'en-US', 'en'],
       });
 
+      Object.defineProperty(navigator, 'language', {
+        get: () => 'he-IL',
+      });
+
+      Object.defineProperty(navigator, 'hardwareConcurrency', {
+        get: () => 8,
+      });
+
+      Object.defineProperty(navigator, 'deviceMemory', {
+        get: () => 8,
+      });
+
       const originalQuery = window.navigator.permissions.query;
       window.navigator.permissions.query = (parameters: any) =>
         originalQuery.call(window.navigator.permissions, parameters);
@@ -282,11 +368,21 @@ export class EnhancedPuppeteerScraperService {
       isLandscape: true,
     });
 
-    await page.setUserAgent(this.chosenUA);
+    const chosenUA = process.env.PUPPETEER_USER_AGENT?.trim() || this.resolvedUserAgent || (await page.browser().userAgent());
+    await this.configureBrowserIdentity(page, chosenUA);
 
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'he,he-IL;q=0.9,en-US;q=0.8,en;q=0.7',
-    });
+    if (!this.launchDiagnosticsLogged) {
+      const runtimeDetails = await page.evaluate(() => ({
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        language: navigator.language,
+        languages: navigator.languages,
+        webdriver: navigator.webdriver,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }));
+      console.log('🧭 Browser fingerprint:', runtimeDetails);
+      this.launchDiagnosticsLogged = true;
+    }
   }
 
   // ── Homepage warmup (referrer chain) ───────────────────────────
@@ -322,10 +418,12 @@ export class EnhancedPuppeteerScraperService {
 
     await page.mouse.click(centerX, centerY);
     await this.randomDelay(2000, 4000);
+    await this.waitForPotentialNavigation(page, 12_000);
 
     // Phase 2: wait patiently for auto-resolve (ShieldSquare JS challenge timeout)
     console.log('⏳ Waiting for challenge to auto-resolve...');
     await this.randomDelay(30_000, 45_000);
+    await this.waitForPotentialNavigation(page, 12_000);
 
     if (!(await this.isBotProtectionActive(page))) return true;
 
@@ -336,6 +434,7 @@ export class EnhancedPuppeteerScraperService {
     const clickY = viewport ? Math.random() * viewport.height * 0.5 + viewport.height * 0.25 : 300;
     await page.mouse.click(clickX, clickY);
     await this.randomDelay(20_000, 35_000);
+    await this.waitForPotentialNavigation(page, 12_000);
 
     return !(await this.isBotProtectionActive(page));
   }
@@ -574,5 +673,80 @@ export class EnhancedPuppeteerScraperService {
   private async randomDelay(min: number, max: number): Promise<void> {
     const delay = Math.floor(Math.random() * (max - min + 1)) + min;
     await new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  private async cleanupStaleProfileLocks(profileDir: string): Promise<void> {
+    const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'DevToolsActivePort'];
+
+    for (const fileName of lockFiles) {
+      const filePath = path.join(profileDir, fileName);
+      try {
+        await fs.promises.rm(filePath, { force: true });
+      } catch {
+        // Ignore cleanup failures; Chrome may still be able to launch.
+      }
+    }
+  }
+
+  private async getOrCreatePage(): Promise<Page> {
+    if (this.page && !this.page.isClosed()) {
+      return this.page;
+    }
+
+    if (!this.browser) {
+      throw new Error('Browser not initialized');
+    }
+
+    this.page = await this.browser.newPage();
+    await this.preparePage(this.page);
+    return this.page;
+  }
+
+  private async preparePage(page: Page): Promise<void> {
+    await this.applyStealthOverrides(page);
+    await this.setViewportAndHeaders(page);
+    await page.setGeolocation(this.geolocation);
+  }
+
+  private async configureBrowserIdentity(page: Page, userAgent: string): Promise<void> {
+    const client = await page.createCDPSession();
+    const chromeVersion = /Chrome\/(\d+)/.exec(userAgent)?.[1] ?? '145';
+    const metadata = {
+      brands: [
+        { brand: 'Google Chrome', version: chromeVersion },
+        { brand: 'Chromium', version: chromeVersion },
+        { brand: 'Not.A/Brand', version: '24' },
+      ],
+      fullVersion: `${chromeVersion}.0.0.0`,
+      platform: 'Linux',
+      platformVersion: '6.1.0',
+      architecture: 'x86',
+      model: '',
+      mobile: false,
+      wow64: false,
+      bitness: '64',
+    };
+
+    await client.send('Network.enable');
+    await client.send('Network.setUserAgentOverride', {
+      userAgent,
+      acceptLanguage: this.acceptLanguage,
+      platform: 'Linux x86_64',
+      userAgentMetadata: metadata,
+    } as any);
+    await client.send('Emulation.setTimezoneOverride', { timezoneId: this.timezone });
+    await client.send('Emulation.setLocaleOverride', { locale: 'he-IL' } as any);
+
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': this.acceptLanguage,
+    });
+  }
+
+  private async waitForPotentialNavigation(page: Page, timeout: number): Promise<void> {
+    try {
+      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout });
+    } catch {
+      /* no navigation happened */
+    }
   }
 }
